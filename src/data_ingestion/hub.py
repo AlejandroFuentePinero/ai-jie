@@ -24,7 +24,8 @@ import os
 
 import pandas as pd
 
-HF_REPO_ID = "Alejandrofupi/ai-jie-jobs"
+HF_REPO_LITE = "Alejandrofupi/ai-jie-jobs-lite"   # DS only
+HF_REPO_FULL = "Alejandrofupi/ai-jie-jobs-full"   # DS + DA
 
 # Internal columns added by the pipeline that are not part of the Job schema.
 _PIPELINE_INTERNAL_COLS = {"_row_id", "prompt_version"}
@@ -32,7 +33,7 @@ _PIPELINE_INTERNAL_COLS = {"_row_id", "prompt_version"}
 
 def push_to_hub(
     df: pd.DataFrame,
-    repo_id: str = HF_REPO_ID,
+    repo_id: str = HF_REPO_LITE,
     private: bool = True,
 ) -> None:
     """
@@ -58,7 +59,7 @@ def push_to_hub(
     print(f"Done → https://huggingface.co/datasets/{repo_id}")
 
 
-def load_from_hub(repo_id: str = HF_REPO_ID) -> pd.DataFrame:
+def load_from_hub(repo_id: str = HF_REPO_LITE) -> pd.DataFrame:
     """
     Load the processed jobs dataset from HuggingFace Hub as a DataFrame.
 

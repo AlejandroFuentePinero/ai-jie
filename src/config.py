@@ -12,7 +12,8 @@ UNIFIED_JOBS_FILE = RAW_DATA_DIR / "jobs_unified.csv"
 
 # Processed data
 PROCESSED_DATA_DIR = DATA_DIR / "processed"
-JOBS_JSONL_FILE = PROCESSED_DATA_DIR / "jobs.jsonl"
+JOBS_LITE_JSONL_FILE = PROCESSED_DATA_DIR / "jobs_lite.jsonl"   # DS only (default)
+JOBS_FULL_JSONL_FILE = PROCESSED_DATA_DIR / "jobs_full.jsonl"   # DS + DA
 
 # Evaluation results
 EVALS_RESULTS_DIR = PROJECT_ROOT / "eval_results"

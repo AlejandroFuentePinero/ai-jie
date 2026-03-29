@@ -34,15 +34,21 @@ _MIN_DESCRIPTION_LEN = 200
 
 def load_raw_jobs(
     ds_path: Path | None = None,
-    da_path: Path | None = None,
+    da_path: Path | None | bool = None,
     min_description_len: int = _MIN_DESCRIPTION_LEN,
 ) -> pd.DataFrame:
     """
     Load and unify DataScientist.csv and DataAnalyst.csv.
 
+    Args:
+        ds_path: Path to DataScientist.csv. Defaults to config.RAW_DS_JOBS_FILE.
+        da_path: Path to DataAnalyst.csv. Defaults to config.RAW_DA_JOBS_FILE.
+                 Pass False to skip DA entirely (lite / DS-only mode).
+        min_description_len: Minimum description character length to keep a row.
+
     Steps:
     - Drops artifact index columns (Unnamed: 0, index).
-    - Keeps all columns common to both files.
+    - Keeps all columns present in DS (and DA when included).
     - Renames pipeline-facing columns to snake_case (title, description, location).
     - Adds a 'source' column ('ds' or 'da') for provenance.
     - Replaces all -1 values (Glassdoor's missing sentinel) with NaN.
@@ -58,20 +64,23 @@ def load_raw_jobs(
     from src.config import RAW_DA_JOBS_FILE, RAW_DS_JOBS_FILE
 
     ds_path = Path(ds_path or RAW_DS_JOBS_FILE)
-    da_path = Path(da_path or RAW_DA_JOBS_FILE)
+    skip_da = da_path is False
+    da_path = None if skip_da else Path(da_path or RAW_DA_JOBS_FILE)
 
     ds = pd.read_csv(ds_path).drop(columns=_DROP_COLS, errors="ignore")
-    da = pd.read_csv(da_path).drop(columns=_DROP_COLS, errors="ignore")
 
-    # Only keep columns present in both files
-    common_cols = [c for c in ds.columns if c in da.columns]
-    ds = ds[common_cols]
-    da = da[common_cols]
-
-    ds["source"] = "ds"
-    da["source"] = "da"
-
-    df = pd.concat([ds, da], ignore_index=True)
+    if skip_da:
+        ds["source"] = "ds"
+        df = pd.concat([ds], ignore_index=True)
+    else:
+        da = pd.read_csv(da_path).drop(columns=_DROP_COLS, errors="ignore")
+        # Compute common columns before adding source to either frame
+        common_cols = [c for c in ds.columns if c in da.columns]
+        ds = ds[common_cols]
+        da = da[common_cols]
+        ds["source"] = "ds"
+        da["source"] = "da"
+        df = pd.concat([ds, da], ignore_index=True)
 
     # Replace Glassdoor's -1 sentinel with NaN across all columns
     df = df.replace(-1, np.nan)

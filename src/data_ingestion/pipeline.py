@@ -128,6 +128,7 @@ def _load_results(path: Path) -> pd.DataFrame:
 # CLI entry point
 # ---------------------------------------------------------------------------
 if __name__ == "__main__":
+    import argparse
     import sys
     from pathlib import Path
 
@@ -140,20 +141,28 @@ if __name__ == "__main__":
     if str(project_root) not in sys.path:
         sys.path.insert(0, str(project_root))
 
-    from src.config import JOBS_JSONL_FILE, RAW_DA_JOBS_FILE, RAW_DS_JOBS_FILE
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "--full",
+        action="store_true",
+        default=False,
+        help="Process both DataScientist + DataAnalyst CSVs. Default: DS only (lite).",
+    )
+    args = parser.parse_args()
+    lite = not args.full
 
-    LENGTH_THRES = 200
+    from src.config import JOBS_FULL_JSONL_FILE, JOBS_LITE_JSONL_FILE
+    from src.data_ingestion.loader import load_raw_jobs
 
-    frames = []
-    for csv_path in [RAW_DS_JOBS_FILE, RAW_DA_JOBS_FILE]:
-        raw = pd.read_csv(csv_path)
-        raw = raw[["Job Title", "Job Description", "Location"]].rename(
-            columns={"Job Title": "title", "Job Description": "description", "Location": "location"}
-        )
-        raw = raw[raw["description"].notna() & (raw["description"].str.len() >= LENGTH_THRES)]
-        frames.append(raw)
+    if lite:
+        # DS only — reads DataScientist.csv
+        df = load_raw_jobs(da_path=False)
+        output_path = JOBS_LITE_JSONL_FILE
+        print(f"Mode: lite | {len(df)} DS rows → {output_path}")
+    else:
+        # Full — reads DataScientist.csv + DataAnalyst.csv
+        df = load_raw_jobs()
+        output_path = JOBS_FULL_JSONL_FILE
+        print(f"Mode: full | {len(df)} rows ({df['source'].value_counts().to_dict()}) → {output_path}")
 
-    df = pd.concat(frames, ignore_index=True)
-    print(f"Loaded {len(df)} rows from {len(frames)} files.")
-
-    asyncio.run(run_pipeline(df, output_path=JOBS_JSONL_FILE))
+    asyncio.run(run_pipeline(df, output_path=output_path))
