@@ -164,22 +164,57 @@ All other fields are extracted. Key design choices:
 
 ## 6. Prompt Version History
 
-| Version | n | Overall | pct_score_1 | Key change |
-|---------|---|---------|-------------|------------|
-| v1 | 50 | ~2.96 | — | Baseline — circular eval (invalid) |
-| v2 | 30 | — | — | After fixing circular eval |
-| v3 | 50 | 2.54 | 36% | Clean baseline; extractor v3 rules |
-| v4 | 50 | 2.40 | 42% | Relaxed skills rules — judge misalignment exposed |
-| v5 | 50 | TBD | — | Judge v5: extraction rules in prompt + temperature=0 |
+| Version | n | seed | Overall | pct_score_1 | skills_soft | Key change |
+|---------|---|------|---------|-------------|-------------|------------|
+| v1 | 50 | 42 | ~2.96 | — | — | Baseline — circular eval bug (invalid) |
+| v2 | 30 | 42 | — | — | — | Fixed circular eval; removed location_accuracy |
+| v3 | 50 | 42 | 2.54 | 36% | 2.52 | Clean baseline |
+| v4 | 50 | 42 | 2.40 | 42% | 2.40 | Relaxed skills rules — judge misalignment exposed |
+| v5 | 50 | 42 | 2.92 | 10% | 2.44 | Judge rewritten with full extraction rules; temperature=0 |
+| v6 | 50 | 42 | 2.78 | 18% | 2.50 | Regression: preferred skills rule broke skills_technical recall |
+| v7 | 50 | 42 | 2.90 | 12% | 2.44 | Fixed: preferred skills belong in both fields |
+| v8 | 50 | 42 | 2.84 | 18% | 2.36 | Regression: job_family enum in extraction prompt hurt attention |
+| v8b | 50 | 42 | 2.90 | 12% | 2.36 | Fixed judge contradiction; enum removed from extractor |
+| **v9** | 50 | 42 | **2.92** | 22% | **2.84** | Inclusive skills_soft default; title-first job_family |
+| v9b | 50 | 123 | 2.88 | 24% | 2.90 | Cross-seed validation |
+| v9c | 50 | 999 | 2.88 | 32% | 2.94 | Cross-seed validation |
+| v10 | 50 | 42 | 2.86 | 30% | 2.90 | Glassdoor hint experiment — judge saw hint, penalised overrides |
+| v10b | 50 | 42 | 2.86 | 24% | 2.92 | Hint hidden from judge — skills_technical still regressed |
+| v10c | 50 | 42 | 2.92 | 20% | 2.80 | Hint removed entirely — v9 parity confirmed; reverted |
+| v9d | 44 | 42 | 2.91 | 23% | 2.84 | v9 re-validation after judge.py bug fix |
+| v9e | 47 | 123 | 2.89 | 23% | 2.89 | v9 re-validation |
+| v9f | 47 | 999 | 2.85 | 23% | 2.96 | v9 re-validation — **v9 selected for batch run** |
 
-### v3 notable flags (clean baseline)
-- `industry_incorrect` — judge applying its own classification vs. stated rule
-- `seniority_incorrect` — disagreement on priority ladder application
-- `skills_technical_precision` — judge penalising broad categories we allow
-- `nice_to_have_accuracy` — skills in requirements section mis-labelled as nice-to-have
+### v6 regression: preferred skills rule
+`skills_technical_recall` dropped -0.28 after adding a "preferred skills → nice_to_have only" rule. The extractor interpreted this as a reason to exclude preferred skills from `skills_technical`. Fix: clarified that preferred-only skills belong in **both** fields — `skills_technical` is exhaustive.
 
-### v4 regression analysis
-`skills_technical_precision` dropped from 2.64 → 2.46. The extraction prompt v4 explicitly allowed broad categories and methodology terms. The judge was penalising exactly what the extractor was now explicitly told to include. This confirmed the judge needed its own update.
+A judge contradiction was also introduced in v6: the `skills_technical_precision` dimension said "preferred-section skills must not appear here", directly opposing the correct rule. Fixed in v8b.
+
+### v8/v8b regression: skills_soft worst-ever (2.36)
+Two compounding problems:
+1. Adding job_family enum descriptions to the extraction prompt (v8) consumed attention and hurt multiple dimensions.
+2. The `Field(description=...)` for `skills_soft` in `models.py` said "Null if only generic filler with no qualifier" — a restrictive default that contradicted the system prompt's "when in doubt, include".
+
+Fix (v9): removed enum from extractor prompt (kept in judge only), and flipped the `skills_soft` Field description to inclusive.
+
+### v10 experiment: Glassdoor industry hint
+
+**Hypothesis**: Injecting the Glassdoor `Industry` label as context in the extractor prompt would improve `industry` extraction, which is the weakest remaining dimension (~2.66–2.76 across seeds).
+
+**Ground-truth test** (`tests/test_industry_extraction.py`): With the hint, exact-match accuracy rose from 36% → 78% on 50 samples. Clearly useful information.
+
+**Judge eval result (v10)**: `industry_accuracy` *dropped* from 2.76 → 2.44. The judge saw the hint in the user message and held the extractor to it strictly — any case where the extractor correctly overrode the hint (e.g. a staffing agency posting for a pharma client, where the correct industry is "Pharmaceutical" not "Staffing") was penalised.
+
+**Fix attempt (v10b)**: Hide the hint from the judge, pass it only to the extractor. `industry_accuracy` remained low (2.42), and `skills_technical` regressed (2.96→2.96 precision but visible noise). The added context in the user message appeared to pull attention away from skills.
+
+**Fix attempt (v10c)**: Different injection mechanism (system prompt addendum), judge still blind. Same `skills_technical` regression.
+
+**Conclusion**: The Glassdoor hint is genuinely useful but the cost (attention dilution on skills fields) outweighs the benefit within the current prompt architecture. `industry_accuracy` in the judge eval is also unreliable regardless — the Glassdoor taxonomy is itself noisy (staffing agencies labelled as the industry they recruit for, labels like "Accounting" on data-tech companies). Reverted fully to v9.
+
+### v9: key prompt engineering findings
+- **`Field(description=...)` values are a second prompt channel** — `instructor` passes them to the LLM as JSON schema. A mismatch between the system prompt rule and the Field description causes the model to hedge, producing under-extraction.
+- **Inclusive defaults outperform restrictive defaults for fuzzy fields** — for `skills_soft`, "include if the employer emphasises it" outperformed "null unless qualifier". The LLM's language understanding is an asset here; fighting it with prescriptive nulling rules hurts quality.
+- **Title-first for job_family** — mirroring the seniority priority ladder (title keyword → responsibilities → other) improved `job_family` from 2.72 to 2.82. Title IS the primary signal.
 
 ---
 
@@ -199,10 +234,37 @@ The judge needs to assess nuanced extraction quality — industry classification
 
 ---
 
-## 8. Outstanding Issues / Next Steps
+## 8. Ground-Truth Testing
 
-- [ ] Analyse v5 eval results vs v3/v4 (run in progress)
-- [ ] Investigate recurring `seniority_incorrect` flags — the priority ladder rule may need clearer examples
-- [ ] Investigate `industry_accuracy` flags — ambiguous cases (e.g. "FinTech" vs "Financial Services") may need tie-breaking examples in the prompt
-- [ ] Consider running full pipeline on all ~3,000–4,000 records once v5 eval confirms improvement
-- [ ] Push full dataset to HuggingFace Hub after final pipeline run
+### LLM-as-a-Judge recall limitation
+
+The judge evaluates `skills_technical_recall` by reading the description and checking whether the extractor missed any skills. This is structurally unreliable: the judge must independently enumerate all skills first, which is the same task as the extractor. Since both models share training distribution, they have the same blind spots — systematic omissions go unpenalised.
+
+`skills_technical_recall` scores (~2.9+) are likely inflated. Useful for detecting regressions, but not as an absolute measure of completeness.
+
+### Industry ground-truth test (`tests/test_industry_extraction.py`)
+
+The raw CSVs contain Glassdoor-sourced `Industry` (specific) and `Sector` (broader) columns — the only structured ground-truth labels in the dataset. These are used to evaluate the extractor's `industry` field directly.
+
+Since the extractor produces free-form text ("Insurance") while the ground truth has its own taxonomy ("Insurance Carriers"), a lightweight LLM comparison call is used rather than string matching.
+
+Scoring: 2 = matches `Industry`, 1 = matches `Sector` only, 0 = wrong, -1 = null.
+
+This is the first evaluation in the project with an objective reference — the result cannot be inflated by shared model blind spots.
+
+---
+
+## 9. Outstanding Issues / Next Steps
+
+- [x] Judge misalignment fixed (v5)
+- [x] Preferred skills regression fixed (v7)
+- [x] skills_soft over-nulling fixed (v9)
+- [x] job_family title-first priority (v9)
+- [x] v9 validated on three independent seeds (v9/v9b/v9c, confirmed stable by v9d/v9e/v9f)
+- [x] Glassdoor hint experiment completed and reverted (v10/v10b/v10c)
+- [x] eval_trend tracker added (`src/evals/eval_trend.py`) — reads all report.json files, writes trend.csv + three trajectory plots
+- [x] runner.py updated to save both `extraction_prompt.txt` and `judge_prompt.txt` per run
+- [ ] **Create human-annotated ground-truth eval set** (20–30 postings, all fields manually labelled) before running the full batch. The LLM judge cannot reliably measure recall — it shares blind spots with the extractor. This is the most important quality gate before batch mode.
+- [ ] `industry_accuracy` (2.66–2.76) is the weakest remaining dimension. The ground-truth test (`tests/test_industry_extraction.py`) confirmed extractor reaches 36% exact-match without hints. Judge scores are unreliable for this dimension due to Glassdoor taxonomy noise. Acceptable for batch run; revisit with a cleaner ground-truth source.
+- [ ] Run full pipeline on all ~3,900 records. **v9 is the selected prompt.**
+- [ ] Push full dataset to HuggingFace Hub (`Alejandrofupi/ai-jie-jobs`) after batch run.

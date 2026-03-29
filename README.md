@@ -42,6 +42,8 @@ ai-jie/
 │   ├── raw/                         # Source CSVs (not committed)
 │   └── processed/                   # Extraction checkpoint (jobs.jsonl)
 ├── eval_results/                    # Per-run eval output
+├── tests/
+│   └── test_industry_extraction.py  # Ground-truth industry accuracy test (Glassdoor labels)
 ├── docs/
 │   └── technical_report.md          # Design decisions and version history
 └── requirements.txt
@@ -153,15 +155,54 @@ The LLM-as-a-Judge scores each extraction on 17 dimensions (1–3 scale) across 
 
 Each eval run saves to `eval_results/<timestamp>_<version>/`:
 - `metadata.json` — run config and timing
-- `prompt.txt` — exact system prompt used
+- `extraction_prompt.txt` — exact extractor system prompt used
+- `judge_prompt.txt` — exact judge prompt used
 - `sample.jsonl` — which records were sampled
 - `extractions.jsonl` — raw LLM outputs
 - `scores.jsonl` — per-record judge scores
 - `report.json` — aggregated scores and flags
 
-**Current baseline (v3, n=50)**: overall = 2.54, 36% of rows with at least one score of 1.
+After any new run, regenerate the trajectory plots:
 
-See [`docs/technical_report.md`](docs/technical_report.md) for full version history and design decisions.
+```bash
+python -m src.evals.eval_trend
+```
+
+### Selected prompt: v9
+
+v9 is the prompt version selected for the full batch run. The table below shows the cross-seed validation (same prompt, three independent samples):
+
+| Run | seed | n | Overall | skills_soft | skills_technical |
+|-----|------|---|---------|-------------|-----------------|
+| v9 | 42 | 50 | 2.92 | 2.84 | 2.98 / 2.98 |
+| v9b | 123 | 50 | 2.88 | 2.90 | 2.92 / 2.92 |
+| v9c | 999 | 50 | 2.88 | 2.94 | 2.96 / 2.96 |
+| v9d *(re-run)* | 42 | 44 | 2.91 | 2.84 | 2.98 / 2.98 |
+| v9e *(re-run)* | 123 | 47 | 2.89 | 2.89 | 2.96 / 2.96 |
+| v9f *(re-run)* | 999 | 47 | 2.85 | 2.96 | 3.00 / 3.00 |
+
+**Why v9 over earlier versions:**
+
+- `skills_soft_accuracy` jumped from 2.36 (v8b) → 2.84–2.96 across seeds. The fix was flipping `skills_soft` from a restrictive default ("null unless explicit qualifier") to an inclusive one ("err on the side of including"). This resolved a judge/extractor misalignment where the judge penalised inclusions the extractor was explicitly instructed to make.
+- `job_family_accuracy` improved from 2.72 (v8b) → 2.82–2.86 by enforcing title-first priority — a clear title keyword always overrides responsibilities-based inference.
+- All other dimensions held stable or improved. No regressions.
+- Validated on three independent seeds — the improvements are not overfit to the development sample.
+
+### Trajectory plots
+
+**Overall score and flag rate across all prompt versions:**
+
+![Eval trend overview](docs/figures/trend_overview.png)
+
+**Score by group (company, role, skills, compensation, overall):**
+
+![Eval trend by group](docs/figures/trend_by_group.png)
+
+**All 17 dimensions (heatmap):**
+
+![Eval trend all fields](docs/figures/trend_all_fields.png)
+
+See [`docs/technical_report.md`](docs/technical_report.md) for full version history, design decisions, and the v10 Glassdoor hint experiment.
 
 ---
 
