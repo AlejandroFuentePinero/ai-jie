@@ -21,7 +21,7 @@ class JobFamily(str, Enum):
     ML_ENGINEERING = "ml_engineering"
     AI_ENGINEERING = "ai_engineering"
     SOFTWARE_ENGINEERING = "software_engineering"
-    ANALYTICS = "analytics"
+    DATA_ANALYTICS = "data_analytics"
     RESEARCH = "research"
     MANAGEMENT = "management"
     OTHER = "other"

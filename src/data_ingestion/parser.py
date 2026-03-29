@@ -25,7 +25,7 @@ You are an expert job posting parser. Your task is to extract structured informa
     3. No title keyword and no years stated → check responsibilities tone. Director-level strategy and P&L ownership → director. Team management → manager. Architecture/cross-team technical decisions → lead. Primarily execution → mid. Very basic/entry tasks → junior.
     4. Still unclear → unknown. Do NOT guess. Use "unknown" rather than a speculative answer.
 - job_family: use this priority order strictly:
-    1. Clear title keyword → use it directly. "Data Engineer" → data_engineering. "ML Engineer" → ml_engineering. "Analytics Engineer" → analytics. "Research Scientist" → research. "Engineering Manager" → management. Do not second-guess a clear title keyword.
+    1. Clear title keyword → use it directly. "Data Engineer" → data_engineering. "ML Engineer" → ml_engineering. "Analytics Engineer" → data_analytics. "Data Analyst" → data_analytics. "Research Scientist" → research. "Engineering Manager" → management. Do not second-guess a clear title keyword.
     2. Ambiguous or generic title (e.g. "Data Scientist", "Engineer", "Specialist") → use primary responsibilities to decide. A "Data Scientist" spending most time on pipelines → data_engineering. A "Data Scientist" building recommendation models → data_science.
     3. Still unclear → other.
   Valid values and their meaning:
@@ -34,7 +34,7 @@ You are an expert job posting parser. Your task is to extract structured informa
     - ml_engineering: deploying/serving ML models, MLOps, model pipelines in production
     - ai_engineering: LLMs, generative AI, prompt engineering, AI product integration
     - software_engineering: general software development, backend/frontend, APIs
-    - analytics: BI, dashboards, reporting, business analysis, SQL-heavy insight work
+    - data_analytics: BI, dashboards, reporting, business analysis, SQL-heavy insight work
     - research: academic/scientific research, R&D, publications
     - management: people management, team leadership, programme/project management
     - other: only if no category above is a reasonable fit

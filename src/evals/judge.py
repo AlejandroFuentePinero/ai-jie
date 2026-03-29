@@ -41,13 +41,13 @@ ROLE
     4. Still unclear → "unknown". This is correct behaviour, not an error.
 - job_family: determined by strict priority:
     1. Clear title keyword → use it directly ("Data Engineer" → data_engineering, "ML Engineer" → ml_engineering,
-       "Analytics Engineer" → analytics, "Research Scientist" → research, "Engineering Manager" → management).
+       "Analytics Engineer" → data_analytics, "Data Analyst" → data_analytics, "Research Scientist" → research, "Engineering Manager" → management).
        Do not override a clear title keyword based on responsibilities.
     2. Ambiguous or generic title (e.g. "Data Scientist", "Engineer") → primary responsibilities decide.
     3. Still unclear → other.
   Valid values: data_science (modelling, stats, experimentation), data_engineering (pipelines, ETL, infrastructure),
     ml_engineering (deploying/serving models, MLOps), ai_engineering (LLMs, generative AI),
-    software_engineering (general dev, APIs), analytics (BI, dashboards, reporting, SQL-heavy insight),
+    software_engineering (general dev, APIs), data_analytics (BI, dashboards, reporting, SQL-heavy insight),
     research (academic/scientific R&D), management (people management, programme management),
     other (nothing else fits). Score 2 if the assignment is defensible but another value is equally valid.
 - years_experience: only if a number is explicitly stated; never inferred from seniority.
