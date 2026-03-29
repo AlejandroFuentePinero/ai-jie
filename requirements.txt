@@ -1,0 +1,8 @@
+pandas
+openai
+instructor
+tqdm
+python-dotenv
+nest-asyncio
+datasets
+huggingface_hub

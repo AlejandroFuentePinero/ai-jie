@@ -1,0 +1,27 @@
+# Environment
+.env
+.env.local
+.env*.local
+
+# Python
+.venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Data — raw source files and local checkpoints
+data/
+
+# Eval results — kept locally, not version controlled
+eval_results/
+
+# Notebooks — excluded (exploration only)
+notebooks/
+
+# macOS
+.DS_Store
