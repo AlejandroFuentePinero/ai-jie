@@ -77,7 +77,7 @@ async def run_pipeline(
         async with sem:
             try:
                 extracted = await parse_posting_async(
-                    row["title"], row["description"], row["location"]
+                    row["title"], row["description"], row["location"],
                 )
                 record = {"_row_id": row_id, **extracted.model_dump()}
                 out_file.write(json.dumps(record, default=str) + "\n")

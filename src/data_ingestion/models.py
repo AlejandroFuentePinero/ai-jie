@@ -56,10 +56,10 @@ class Job(BaseModel):
     # --- Role ---
     seniority: Optional[Seniority] = Field(
         None,
-        description="Infer from title + years required + tone. Prefer years required over title if conflicting.",
+        description="Title keyword takes priority. Fall back to years of experience, then responsibilities tone, then unknown.",
     )
     job_family: Optional[JobFamily] = Field(
-        None, description="Closest functional category for this role."
+        None, description="Title keyword takes priority. Use responsibilities as tiebreaker when the title is ambiguous."
     )
     years_experience_min: Optional[int] = Field(
         None, description="Minimum years of experience explicitly stated."
@@ -79,14 +79,15 @@ class Job(BaseModel):
     # --- Skills ---
     skills_technical: Optional[list[str]] = Field(
         None,
-        description="Concrete tools and technologies only e.g. Python, Spark, dbt. Exclude vague phrases like 'modern stack'.",
+        description="All named tools, technologies, platform categories, and methodology terms from the full document. Exhaustive. Exclude only pure marketing filler.",
     )
     skills_soft: Optional[list[str]] = Field(
-        None, description="Interpersonal or organisational skills explicitly mentioned."
+        None,
+        description="Interpersonal or organisational skills the employer genuinely emphasises. Concise phrases (2–7 words). Null only if the posting contains no meaningful soft skill signal.",
     )
     nice_to_have: Optional[list[str]] = Field(
         None,
-        description="Skills or qualifications explicitly marked as preferred, bonus, or not required.",
+        description="Skills from sections or sentences with explicit preferred/bonus language only. Concise skill names.",
     )
 
     # --- Compensation ---

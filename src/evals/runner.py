@@ -14,7 +14,8 @@ Output layout (one timestamped directory per run)
 eval_results/
   {YYYYMMDD_HHMMSS}_{prompt_version}/
     metadata.json      — run config (n, seed, models, timestamp)
-    prompt.txt         — exact JUDGE_PROMPT used (reproducibility)
+    extraction_prompt.txt — exact SYSTEM_PROMPT used by the extractor
+    judge_prompt.txt      — exact JUDGE_PROMPT used (reproducibility)
     sample.jsonl       — raw input rows (title, description, location)
     extractions.jsonl  — parse_posting outputs (_row_id + Job fields)
     scores.jsonl       — judge outputs (_row_id + EvaluationScore fields)
@@ -31,6 +32,7 @@ import pandas as pd
 from tqdm.asyncio import tqdm_asyncio
 
 from src.data_ingestion.parser import MODEL as EXTRACTION_MODEL
+from src.data_ingestion.parser import SYSTEM_PROMPT as EXTRACTION_PROMPT
 from src.data_ingestion.parser import parse_posting_async
 from src.evals.judge import JUDGE_MODEL, JUDGE_PROMPT, judge_extraction_async
 from src.evals.report import build_report, print_summary, save_report
@@ -94,8 +96,9 @@ async def run_eval(
         "concurrency": concurrency,
     }
     (run_dir / "metadata.json").write_text(json.dumps(metadata, indent=2))
-    (run_dir / "prompt.txt").write_text(JUDGE_PROMPT)
-    print(f"  metadata.json + prompt.txt saved")
+    (run_dir / "extraction_prompt.txt").write_text(EXTRACTION_PROMPT)
+    (run_dir / "judge_prompt.txt").write_text(JUDGE_PROMPT)
+    print(f"  metadata.json + extraction_prompt.txt + judge_prompt.txt saved")
 
     # ── Extract + Judge (concurrent) ──────────────────────────────────────
     extraction_records: list[dict] = []
@@ -109,7 +112,7 @@ async def run_eval(
             # Step 1 — extraction
             try:
                 extracted = await parse_posting_async(
-                    row["title"], row["description"], row["location"]
+                    row["title"], row["description"], row["location"],
                 )
             except Exception as exc:
                 failures.append({
@@ -124,7 +127,7 @@ async def run_eval(
             # Step 2 — judge
             try:
                 scores = await judge_extraction_async(
-                    row["title"], row["description"], extracted
+                    row["title"], row["description"], extracted,
                 )
             except Exception as exc:
                 failures.append({

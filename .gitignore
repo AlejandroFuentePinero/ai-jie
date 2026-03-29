@@ -23,5 +23,11 @@ eval_results/
 # Notebooks — excluded (exploration only)
 notebooks/
 
+# Claude Code
+CLAUDE.md
+
 # macOS
 .DS_Store
+
+# Experiments
+tests/

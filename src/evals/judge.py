@@ -39,23 +39,40 @@ ROLE
        Use midpoint of a range (e.g. "3-5 years" → mid).
     3. No title keyword and no years → responsibilities tone.
     4. Still unclear → "unknown". This is correct behaviour, not an error.
-- job_family: based on PRIMARY responsibilities, not title. A "Data Scientist" doing mostly pipeline
-  work → data_engineering is correct. "other" only if no category fits reasonably.
+- job_family: determined by strict priority:
+    1. Clear title keyword → use it directly ("Data Engineer" → data_engineering, "ML Engineer" → ml_engineering,
+       "Analytics Engineer" → analytics, "Research Scientist" → research, "Engineering Manager" → management).
+       Do not override a clear title keyword based on responsibilities.
+    2. Ambiguous or generic title (e.g. "Data Scientist", "Engineer") → primary responsibilities decide.
+    3. Still unclear → other.
+  Valid values: data_science (modelling, stats, experimentation), data_engineering (pipelines, ETL, infrastructure),
+    ml_engineering (deploying/serving models, MLOps), ai_engineering (LLMs, generative AI),
+    software_engineering (general dev, APIs), analytics (BI, dashboards, reporting, SQL-heavy insight),
+    research (academic/scientific R&D), management (people management, programme management),
+    other (nothing else fits). Score 2 if the assignment is defensible but another value is equally valid.
 - years_experience: only if a number is explicitly stated; never inferred from seniority.
 - key_responsibilities: 3-5 concrete verb-led actions; generic filler excluded.
 - education_required: only if explicitly required, not preferred.
 
 SKILLS
-- skills_technical: ALL named tools AND skill categories are expected — specific products (Python,
-  Spark, Tableau), common tools (Excel, Git, SQL), platform categories (cloud computing, BI tools,
-  data warehousing), and methodology terms (machine learning, NLP, A/B testing). Only pure marketing
-  filler with no technical content is excluded ("modern stack", "cutting-edge tools"). If both a
-  category and a specific product are named, both should appear.
-- skills_soft: only included if explicitly stated with a specific qualifier. Generic filler with no
-  qualifier ("team player", "attention to detail") may be null — this is correct, not an omission.
+- skills_technical: ALL named tools AND skill categories from the entire document are expected —
+  specific products (Python, Spark, Tableau), common tools (Excel, Git, SQL), platform categories
+  (cloud computing, BI tools, data warehousing), and methodology terms (machine learning, NLP,
+  A/B testing). Includes skills from both required AND preferred sections — this list is exhaustive.
+  Only pure marketing filler is excluded ("modern stack", "cutting-edge tools").
+  Process/project methodology terms (Agile, Scrum, Kanban) belong here, not in skills_soft.
+- skills_soft: included when the employer genuinely emphasises a soft skill for this role. Obvious generic
+  boilerplate with zero specificity ("team player", "fast learner" with no context) may be null — correct.
+  If the employer devoted a sentence or bullet to it, inclusion is expected. Err on the side of including.
+  Should be concise phrases (2–7 words), not full verbatim sentences — condensed labels are correct.
+  Process/methodology terms (Agile, Scrum) in skills_soft is an error; they belong in skills_technical.
 - nice_to_have: only from text using explicit words: "preferred", "nice to have", "a plus", "bonus",
   "ideally", "would be an asset", "desirable". Skills in a requirements section are required, not
-  nice-to-have. Should not duplicate skills already in skills_technical.
+  nice-to-have. Should be concise skill names, not full sentences.
+  IMPORTANT: a preferred-only skill appearing in BOTH skills_technical and nice_to_have is CORRECT
+  — skills_technical is exhaustive, nice_to_have flags the skill as optional. Do NOT penalise this.
+  A violation is: a clearly required skill in nice_to_have, OR nice_to_have skills with no explicit
+  preferred/bonus language in the source.
 
 COMPENSATION
 - salary: only if explicitly stated as a number or range; never inferred.
@@ -84,17 +101,21 @@ COMPANY
 
 ROLE
 - seniority_accuracy           follows the priority order above; "unknown" is correct when genuinely unclear
-- job_family_accuracy          closest category based on primary responsibilities
+- job_family_accuracy          title-first: clear title keyword overrides responsibilities; ambiguous title → responsibilities
 - years_experience_accuracy    only extracted if explicitly stated as a number
 - education_accuracy           only required education; preferred/nice-to-have education excluded
 - responsibilities_quality     concrete verb-led actions, no generic filler
 
 SKILLS
-- skills_technical_precision   includes named tools, categories, and methodology terms per the rules;
-                               penalise only pure marketing filler or hallucinated tools
+- skills_technical_precision   includes named tools, categories, and methodology terms from the full
+                               document; Agile/Scrum are technical not soft; preferred-section skills
+                               ARE expected here — skills_technical is exhaustive
 - skills_technical_recall      named tools and categories from the text were not missed
-- skills_soft_accuracy         explicitly stated soft skills included; generic filler may be null (correct)
-- nice_to_have_accuracy        only skills from explicitly marked preferred/bonus sections; no duplicates
+- skills_soft_accuracy         soft skills the employer emphasises, as concise phrases; Agile/Scrum in
+                               skills_soft is an error; only pure generic boilerplate with no context may be null
+- nice_to_have_accuracy        only skills from explicitly preferred/bonus sections; as concise names not
+                               sentences; preferred-only skills in both fields is correct — do NOT penalise;
+                               penalise only if required skills appear here or if preferred language is absent
 
 COMPENSATION
 - salary_accuracy              only extracted if explicitly stated; correct currency and period

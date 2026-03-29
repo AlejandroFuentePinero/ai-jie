@@ -24,15 +24,34 @@ You are an expert job posting parser. Your task is to extract structured informa
     2. No title keyword (e.g. "Data Scientist", "Analyst", "Engineer") → check years of experience required: 0-1 yrs → junior, 2-4 yrs → mid, 5-7 yrs → senior, 8+ yrs → lead. Use the midpoint if a range is given (e.g. "3-5 years" → mid).
     3. No title keyword and no years stated → check responsibilities tone. Director-level strategy and P&L ownership → director. Team management → manager. Architecture/cross-team technical decisions → lead. Primarily execution → mid. Very basic/entry tasks → junior.
     4. Still unclear → unknown. Do NOT guess. Use "unknown" rather than a speculative answer.
-- job_family: assign based on the primary responsibilities, not the title. A "Data Scientist" who spends 80% of their time building pipelines → data_engineering. Only use "other" if no category is a reasonable fit.
+- job_family: use this priority order strictly:
+    1. Clear title keyword → use it directly. "Data Engineer" → data_engineering. "ML Engineer" → ml_engineering. "Analytics Engineer" → analytics. "Research Scientist" → research. "Engineering Manager" → management. Do not second-guess a clear title keyword.
+    2. Ambiguous or generic title (e.g. "Data Scientist", "Engineer", "Specialist") → use primary responsibilities to decide. A "Data Scientist" spending most time on pipelines → data_engineering. A "Data Scientist" building recommendation models → data_science.
+    3. Still unclear → other.
+  Valid values and their meaning:
+    - data_science: modelling, statistical analysis, experimentation, predictions
+    - data_engineering: pipelines, ETL, data infrastructure, warehousing
+    - ml_engineering: deploying/serving ML models, MLOps, model pipelines in production
+    - ai_engineering: LLMs, generative AI, prompt engineering, AI product integration
+    - software_engineering: general software development, backend/frontend, APIs
+    - analytics: BI, dashboards, reporting, business analysis, SQL-heavy insight work
+    - research: academic/scientific research, R&D, publications
+    - management: people management, team leadership, programme/project management
+    - other: only if no category above is a reasonable fit
 - years_experience_min / max: only extract if a number is explicitly stated. Do not infer from seniority level.
 - key_responsibilities: extract 3-5 concrete actions. Start each with a verb. Exclude generic filler like "work in an agile team" or "communicate with stakeholders" unless they are the core of the role.
 - education_required: only extract if explicitly stated as required (e.g. "Bachelor's degree required", "must have a degree in"). Do not extract education listed under preferred, nice-to-have, or bonus sections.
 
 ## Skills fields
-- skills_technical: extract ALL named tools, technologies, and skill categories — including specific products (Python, Spark, Tableau), common tools (Excel, Git, SQL, Linux), platform categories (cloud computing, BI tools, data warehousing), and methodology terms (machine learning, NLP, A/B testing). Do not skip a skill because it seems basic or broad. Only exclude pure marketing filler with zero technical content: "modern stack", "cutting-edge tools", "latest technologies". If a specific product is named alongside a category (e.g. "BI tools like Tableau"), extract both.
-- skills_soft: null unless a soft skill is explicitly stated with a specific qualifier. "Strong written and verbal communication" → include. "Ability to present findings to executives" → include. Truly generic filler with no qualifier — "team player", "attention to detail" — null these only if they appear with no further specificity. When in doubt, include it.
-- nice_to_have: only include skills from sections or sentences explicitly using words like "preferred", "nice to have", "a plus", "bonus", "ideally", "would be an asset", "desirable". A skill listed in a "requirements" section is required even if phrased gently. Do not duplicate skills that are already in skills_technical.
+- skills_technical: extract ALL named tools, technologies, and skill categories from the entire document — including specific products (Python, Spark, Tableau), common tools (Excel, Git, SQL, Linux), platform categories (cloud computing, BI tools, data warehousing), and methodology terms (machine learning, NLP, A/B testing). Include skills from both required AND preferred sections — this list is exhaustive. Only exclude pure marketing filler with zero technical content: "modern stack", "cutting-edge tools". If a specific product is named alongside a category (e.g. "BI tools like Tableau"), extract both.
+  - Process/project methodology terms (Agile, Scrum, Kanban, Lean, Six Sigma, Waterfall) are technical skills — put them here, not in skills_soft.
+- skills_soft: include soft skills the employer genuinely emphasises for this role. If the employer devoted a sentence or bullet to it, it is likely intentional — include it. Exclude only obvious generic boilerplate with zero specificity ("team player", "fast learner" with no further context). Err on the side of including.
+  - Extract as concise phrases (2–7 words), not full verbatim sentences. Condense "Must possess ability to effectively communicate with team members and across all departments/levels of the organization" → "Strong cross-functional communication skills".
+  - Process/project methodology terms (Agile, Scrum, Kanban) belong in skills_technical, not here.
+- nice_to_have: only include skills from sections or sentences explicitly using words like "preferred", "nice to have", "a plus", "bonus", "ideally", "would be an asset", "desirable". A skill listed in a "requirements" section is required even if phrased gently.
+  - Extract as concise skill names (e.g. "Spark", "Tableau"), not full sentences.
+  - A preferred-only skill appearing in both skills_technical and nice_to_have is correct — skills_technical is exhaustive, nice_to_have flags it as optional.
+  - A violation is: a clearly required skill appearing in nice_to_have, or nice_to_have skills without any explicit preferred/bonus language in the source.
 
 ## Compensation fields
 - Only extract salary if explicitly stated as a number or range. Do not infer from seniority or market knowledge.
@@ -60,7 +79,11 @@ def _get_sync_client():
     return _sync_client
 
 
-async def parse_posting_async(job_title: str, job_description: str, location: str) -> Job:
+async def parse_posting_async(
+    job_title: str,
+    job_description: str,
+    location: str,
+) -> Job:
     """Async extraction — use this in the pipeline for concurrent processing."""
     return await _get_async_client().chat.completions.create(
         model=MODEL,
@@ -77,7 +100,12 @@ async def parse_posting_async(job_title: str, job_description: str, location: st
     )
 
 
-def parse_posting(job_title: str, job_description: str, location: str, verbose: bool = True) -> Job:
+def parse_posting(
+    job_title: str,
+    job_description: str,
+    location: str,
+    verbose: bool = True,
+) -> Job:
     """Sync wrapper — kept for notebook exploration."""
     result = _get_sync_client().chat.completions.create(
         model=MODEL,
