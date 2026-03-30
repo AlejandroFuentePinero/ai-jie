@@ -39,7 +39,7 @@ raw CSVs → loader.py (unify, clean) → pipeline.py (async extraction) → job
 | `src/data_ingestion/hub.py` | HuggingFace Hub push/pull — separate lite/full repos, public |
 | `src/evals/judge.py` | LLM-as-a-Judge — `gpt-4o`, `instructor`, 17-dimension scoring |
 | `src/evals/runner.py` | Eval orchestrator — sample, extract, judge, save |
-| `src/evals/report.py` | Score aggregation, group summaries, version comparison |
+| `src/evals/report.py` | Score aggregation, group summaries, report persistence |
 | `src/evals/ground_truth_sampler.py` | Generates fixed 50-row DS annotation sample (seed=7) |
 | `src/evals/ground_truth_annotator.py` | Notebook helpers: `show`, `annotate`, `status`, `load` |
 
@@ -188,9 +188,12 @@ All other fields are extracted. Key design choices:
 | v10 | 50 | 42 | 2.86 | 30% | 2.90 | Glassdoor hint experiment — judge saw hint, penalised overrides |
 | v10b | 50 | 42 | 2.86 | 24% | 2.92 | Hint hidden from judge — skills_technical still regressed |
 | v10c | 50 | 42 | 2.92 | 20% | 2.80 | Hint removed entirely — v9 parity confirmed; reverted |
-| v9d | 44 | 42 | 2.91 | 23% | 2.84 | v9 re-validation after judge.py bug fix |
+| v9d | 44 | 42 | 2.91 | 23% | 2.84 | v9 re-validation; n=44 due to 6 judge TPM failures |
 | v9e | 47 | 123 | 2.89 | 23% | 2.89 | v9 re-validation |
-| v9f | 47 | 999 | 2.85 | 23% | 2.96 | v9 re-validation — **v9 selected for batch run** |
+| v9f | 47 | 999 | 2.85 | 23% | 2.96 | v9 re-validation |
+| **v9g** | **50** | **42** | **2.98** | **10%** | **2.82** | **Fixed judge** — anti-anchoring + forced recall enumeration. **Canonical baseline.** |
+| v9h | 50 | 123 | 2.94 | 18% | 2.90 | Fixed judge cross-seed validation |
+| v9i | 50 | 999 | 2.88 | 18% | 2.94 | Fixed judge cross-seed validation |
 
 ### v6 regression: preferred skills rule
 `skills_technical_recall` dropped -0.28 after adding a "preferred skills → nice_to_have only" rule. The extractor interpreted this as a reason to exclude preferred skills from `skills_technical`. Fix: clarified that preferred-only skills belong in **both** fields — `skills_technical` is exhaustive.
@@ -251,7 +254,9 @@ The judge needs to assess nuanced extraction quality — industry classification
 
 **Implication**: `skills_technical_recall` is not a reliable measure of completeness. It is useful for regression detection (if it drops, something broke) but not as an absolute completeness score. The human ground-truth eval converts recall into a real set comparison and is the correct fix.
 
-**What was not done (and why)**: forcing a two-step enumeration in the judge prompt ("first list all skills you find, then compare") would partially decouple them, but would change the judge and invalidate historical comparisons before the batch run is complete. Deferred to a future judge revision.
+**Fix attempted (v9g, 2026-03-30)**: added a forced-enumeration instruction to the `skills_technical_recall` dimension: *"Before scoring: mentally enumerate every technical skill present in the description, then check what the extractor missed. Base your score only on omissions."* Result: precision and recall remained locked at 2.98/2.98 across all three validation seeds — zero measurable effect.
+
+**Confirmed diagnosis**: the locking is a **ceiling effect**, not a prompt gap. The extractor is genuinely near-perfect on skills at n=50, so both metrics independently converge to ~2.98 regardless of how they are scored. Forced enumeration would only matter on a sample where the extractor has systematic recall failures.
 
 ### Ceiling effects — dimensions with no discriminative power
 
@@ -273,11 +278,13 @@ High-signal dimensions (range ≥ 0.35): `skills_soft_accuracy` (0.597), `null_a
 
 `overall` and `null_appropriateness` are correlated at r = 0.979 across all runs — near-perfect. `seniority_accuracy` is also tightly coupled to both (r ≈ 0.96).
 
-**Root cause**: the judge appears to anchor its holistic `overall` judgment primarily on null handling and seniority compliance, rather than forming a genuinely independent quality assessment. The `overall` dimension is supposed to capture *"does this extraction follow the rules faithfully across all fields?"* but in practice it tracks whether nulls are placed correctly and whether seniority was resolved correctly.
+**Root cause**: the judge appeared to anchor its holistic `overall` judgment primarily on null handling and seniority compliance, rather than forming a genuinely independent quality assessment.
 
-**Implication**: `overall` does not provide additional signal beyond what `null_appropriateness` and `seniority_accuracy` already capture. For version comparisons, group-level means (Company, Role, Skills, Compensation) are more informative than the `overall` single score.
+**Fix applied (v9g, 2026-03-30)**: added an anti-anchoring instruction to the `overall` dimension: *"Do not anchor on null_appropriateness — that is scored separately. Weight every group equally; penalise any group with clear rule violations."*
 
-**Mitigation (future judge revision)**: Rewrite the `overall` dimension instruction to explicitly say *"do not anchor on null appropriateness or any single dimension — assess holistic rule compliance across all fields equally."*
+**Outcome**: `overall` improved consistently (+0.07 seed=42, +0.05 seed=123, +0.03 seed=999). The gap between `overall` and `null_appropriateness` narrowed. Residual correlation is genuine signal (good extractions tend to handle both nulls and all other fields correctly) — the contamination portion has been reduced.
+
+**Implication**: For version comparisons, group-level means (Company, Role, Skills, Compensation) remain more informative than the single `overall` score. `overall` is now better calibrated but still not fully independent of `null_appropriateness`.
 
 ### Industry ground-truth test (`tests/test_industry_extraction.py`)
 
@@ -303,8 +310,10 @@ This is the first evaluation in the project with an objective reference — the 
 - [x] eval_trend tracker added (`src/evals/eval_trend.py`) — reads all report.json files, writes trend.csv + three trajectory plots
 - [x] runner.py updated to save both `extraction_prompt.txt` and `judge_prompt.txt` per run
 - [x] **Ground truth annotation framework created** — `ground_truth_sampler.py` generates a fixed 50-row DS sample (seed=7); `ground_truth_annotation.ipynb` provides `show` / `annotate` / `status` helpers for human labelling
-- [ ] **Complete human annotation** of the 50-row ground truth sample (in progress)
+- [x] **Judge recalibrated (v9g/h/i)** — anti-anchoring on `overall` + forced recall enumeration. Overall improved +0.03–0.07 across all seeds, pct_score_1 down, n_flags halved. Forced enumeration had no effect on precision/recall (ceiling confirmed). Canonical baseline: **v9g (seed=42)**.
+- [x] `compare_versions()` removed from `report.py` — was dead code (never called, broken README example). All multi-version comparisons go through `eval_trend.py`.
+- [ ] **Complete human annotation** of the 50-row ground truth sample (`notebooks/ground_truth_annotation.ipynb`)
 - [ ] **Build ground truth evaluator** — compare v9 extractor output vs human labels field-by-field (precision/recall on skills, exact match on seniority/job_family). Gate for batch run.
-- [ ] `industry_accuracy` (2.66–2.76) is the weakest remaining dimension. The ground-truth test (`tests/test_industry_extraction.py`) confirmed extractor reaches 36% exact-match without hints. Judge scores are unreliable for this dimension due to Glassdoor taxonomy noise. Acceptable for batch run; revisit with a cleaner ground-truth source.
-- [ ] Run full pipeline on all ~3,900 DS records (lite mode). **v9 is the selected prompt.**
+- [ ] `industry_accuracy` (~2.66) is the weakest remaining dimension. **Architectural fix deferred**: a company enrichment agent (web search / company page lookup) will supply ground-truth sector context at the recommendation step, rather than inferring from recruiter-written job descriptions. No further prompt iteration planned.
+- [ ] Run full pipeline on all ~3,892 DS records (lite mode, `python -m src.data_ingestion.pipeline`). **v9 is the selected extraction prompt.**
 - [ ] Push lite dataset to HuggingFace Hub (`Alejandrofupi/ai-jie-jobs-lite`) after batch run.

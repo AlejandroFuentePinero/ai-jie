@@ -200,19 +200,13 @@ if __name__ == "__main__":
     if str(project_root) not in sys.path:
         sys.path.insert(0, str(project_root))
 
-    from src.config import EVALS_RESULTS_DIR, RAW_DS_JOBS_FILE
+    from src.config import EVALS_RESULTS_DIR
+    from src.data_ingestion.loader import load_raw_jobs
 
-    LENGTH_THRES = 200
-    raw = pd.read_csv(RAW_DS_JOBS_FILE)
-    df = (
-        raw[["Job Title", "Job Description", "Location"]]
-        .rename(columns={"Job Title": "title", "Job Description": "description", "Location": "location"})
-        .pipe(lambda d: d[d["description"].notna() & (d["description"].str.len() >= LENGTH_THRES)])
-        .reset_index(drop=True)
-    )
+    df = load_raw_jobs(da_path=False)
     print(f"Loaded {len(df)} rows")
 
     results = asyncio.run(
-        run_eval(df, output_root=EVALS_RESULTS_DIR, n=RECOMMENDED_N, seed=42, prompt_version="v1")
+        run_eval(df, output_root=EVALS_RESULTS_DIR, n=RELEASE_N, seed=42, prompt_version="v9g")
     )
     print(f"\nFinal results shape: {results.shape}")

@@ -110,7 +110,10 @@ SKILLS
 - skills_technical_precision   includes named tools, categories, and methodology terms from the full
                                document; Agile/Scrum are technical not soft; preferred-section skills
                                ARE expected here — skills_technical is exhaustive
-- skills_technical_recall      named tools and categories from the text were not missed
+- skills_technical_recall      Score this INDEPENDENTLY of precision. Before scoring: mentally enumerate
+                               every technical skill present in the description, then check what the
+                               extractor missed. Base your score only on omissions — do not conflate
+                               with whether extracted items are correct (that is precision).
 - skills_soft_accuracy         soft skills the employer emphasises, as concise phrases; Agile/Scrum in
                                skills_soft is an error; only pure generic boilerplate with no context may be null
 - nice_to_have_accuracy        only skills from explicitly preferred/bonus sections; as concise names not
@@ -122,7 +125,11 @@ COMPENSATION
 
 OVERALL
 - null_appropriateness         nulls used correctly — penalise hallucinated values and clear over-nulling
-- overall                      holistic quality: does this extraction follow the rules faithfully?
+- overall                      Holistic rule compliance across ALL field groups equally (Company, Role,
+                               Skills, Compensation). Do NOT anchor on null_appropriateness — that is
+                               scored separately. A high null_appropriateness does not imply a high
+                               overall score if other fields have systematic errors, and vice versa.
+                               Weight every group equally; penalise any group with clear rule violations.
 - flags                        specific rule violations as short strings; empty list if none
 
 Return ONLY a valid JSON object with exactly these keys. No preamble, no markdown fences.

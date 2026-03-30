@@ -1,5 +1,5 @@
 """
-Reporting utilities: score group definitions, summary printing, version comparison.
+Reporting utilities: score group definitions, summary printing, and report persistence.
 Moved from the notebook so they can be reused across runs and scripts.
 """
 
@@ -94,27 +94,6 @@ def print_summary(scores_df: pd.DataFrame, n_failures: int = 0) -> None:
         for flag in all_flags:
             print(f"    • {flag}")
 
-
-def compare_versions(results_v1: pd.DataFrame, results_v2: pd.DataFrame) -> pd.DataFrame:
-    """
-    Compare mean scores across two prompt versions side by side.
-    Pass the DataFrames returned by run_eval() for each version.
-    """
-    score_cols = [c for c in ALL_SCORE_COLS if c in results_v1.columns and c in results_v2.columns]
-    v1 = results_v1[score_cols].mean().rename("v1")
-    v2 = results_v2[score_cols].mean().rename("v2")
-    comparison = pd.concat([v1, v2], axis=1)
-    comparison["delta"] = (comparison["v2"] - comparison["v1"]).round(2)
-    comparison["direction"] = comparison["delta"].apply(
-        lambda x: "▲ improved" if x > 0 else ("▼ regressed" if x < 0 else "— unchanged")
-    )
-    print("\nPROMPT VERSION COMPARISON")
-    try:
-        from IPython.display import display
-        display(comparison.round(3))
-    except ImportError:
-        print(comparison.round(3).to_string())
-    return comparison
 
 
 def build_report(scores_df: pd.DataFrame) -> dict:

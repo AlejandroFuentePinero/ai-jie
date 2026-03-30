@@ -34,7 +34,7 @@ _PIPELINE_INTERNAL_COLS = {"_row_id", "prompt_version"}
 def push_to_hub(
     df: pd.DataFrame,
     repo_id: str = HF_REPO_LITE,
-    private: bool = True,
+    private: bool = False,
 ) -> None:
     """
     Push a processed jobs DataFrame to HuggingFace Hub as a Parquet dataset.

@@ -37,7 +37,7 @@ ai-jie/
 │   └── evals/
 │       ├── judge.py                 # LLM-as-a-Judge (gpt-4o, instructor)
 │       ├── runner.py                # Eval orchestrator
-│       ├── report.py                # Score aggregation and version comparison
+│       ├── report.py                # Score aggregation, group summaries, report persistence
 │       ├── ground_truth_sampler.py  # Generates fixed annotation sample from DS CSV
 │       └── ground_truth_annotator.py # Notebook helpers for human labelling
 ├── notebooks/
@@ -126,18 +126,30 @@ Samples n records, runs extraction + judge, saves full results.
 ```python
 import asyncio, pandas as pd
 from src.evals.runner import run_eval
-from src.config import JOBS_JSONL_FILE
+from src.data_ingestion.loader import load_raw_jobs
+from src.config import EVALS_RESULTS_DIR
 
-df = pd.read_json(JOBS_JSONL_FILE, lines=True)
-asyncio.run(run_eval(df, output_root="eval_results", n=50, seed=42, prompt_version="v5"))
+df = load_raw_jobs(da_path=False)
+asyncio.run(run_eval(df, output_root=EVALS_RESULTS_DIR, n=50, seed=42, prompt_version="vN"))
 ```
 
 ### Compare eval versions
 
-```python
-from src.evals.report import compare_versions
+Use `eval_trend` — it reads all historical runs from disk and produces a trajectory CSV + plots:
 
-compare_versions("eval_results/20260329_061955_v3", "eval_results/20260329_063302_v4")
+```bash
+python -m src.evals.eval_trend
+```
+
+Or in a notebook:
+
+```python
+from src.evals.eval_trend import build_trend, plot_trends
+from src.config import EVALS_RESULTS_DIR
+
+df = build_trend(EVALS_RESULTS_DIR)
+figs = plot_trends(df, notebook_mode=True)
+figs["overview"]
 ```
 
 ---
@@ -194,14 +206,19 @@ python -m src.evals.eval_trend
 
 v9 is the prompt version selected for the full batch run. The table below shows the cross-seed validation (same prompt, three independent samples):
 
-| Run | seed | n | Overall | skills_soft | skills_technical |
-|-----|------|---|---------|-------------|-----------------|
-| v9 | 42 | 50 | 2.92 | 2.84 | 2.98 / 2.98 |
-| v9b | 123 | 50 | 2.88 | 2.90 | 2.92 / 2.92 |
-| v9c | 999 | 50 | 2.88 | 2.94 | 2.96 / 2.96 |
-| v9d *(re-run)* | 42 | 44 | 2.91 | 2.84 | 2.98 / 2.98 |
-| v9e *(re-run)* | 123 | 47 | 2.89 | 2.89 | 2.96 / 2.96 |
-| v9f *(re-run)* | 999 | 47 | 2.85 | 2.96 | 3.00 / 3.00 |
+| Run | seed | n | Overall | skills_soft | skills_technical | Notes |
+|-----|------|---|---------|-------------|-----------------|-------|
+| v9 | 42 | 50 | 2.92 | 2.84 | 2.98 / 2.98 | |
+| v9b | 123 | 50 | 2.88 | 2.90 | 2.92 / 2.92 | |
+| v9c | 999 | 50 | 2.88 | 2.94 | 2.96 / 2.96 | |
+| v9d | 42 | 44 | 2.91 | 2.84 | 2.98 / 2.98 | 6 failures (TPM) |
+| v9e | 123 | 47 | 2.89 | 2.89 | 2.96 / 2.96 | |
+| v9f | 999 | 47 | 2.85 | 2.96 | 3.00 / 3.00 | |
+| **v9g** *(fixed judge)* | **42** | **50** | **2.98** | 2.82 | 2.98 / 2.98 | **Canonical baseline** |
+| v9h *(fixed judge)* | 123 | 50 | 2.94 | 2.90 | 2.98 / 2.98 | |
+| v9i *(fixed judge)* | 999 | 50 | 2.88 | 2.94 | 2.98 / 2.98 | |
+
+The **fixed judge** (v9g+) applies two corrections to `judge.py` with no change to extraction: an anti-anchoring instruction on the `overall` dimension and a forced-enumeration instruction on `skills_technical_recall`. See the technical report §8 for the full bias analysis.
 
 **Why v9 over earlier versions:**
 
