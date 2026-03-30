@@ -38,7 +38,8 @@ ai-jie/
 │       ├── judge.py                 # LLM-as-a-Judge (gpt-4o, instructor)
 │       ├── runner.py                # Eval orchestrator
 │       ├── report.py                # Score aggregation, group summaries, report persistence
-│       └── eval_trend.py            # Reads all report.json files, writes trend.csv + plots
+│       ├── eval_trend.py            # Reads all report.json files, writes trend.csv + plots
+│       └── human_eval.py            # Human scoring — same schema as judge, compare() for calibration check
 ├── data/
 │   ├── raw/                         # Source CSVs (not committed); jobs_unified.csv
 │   └── processed/                   # jobs_lite.jsonl (DS only), jobs_full.jsonl (DS+DA)
@@ -237,6 +238,36 @@ The **fixed judge** (v9g+) applies two corrections to `judge.py` with no change 
 **All 17 dimensions (heatmap):**
 
 ![Eval trend all fields](docs/figures/trend_all_fields.png)
+
+### Human evaluation
+
+Score extractions yourself using the same 17-dimension schema as the judge. Produces `human_scores.jsonl` alongside `scores.jsonl` so the two can be compared row by row — both as an independent extraction quality signal and as a judge calibration check.
+
+```python
+from src.evals.human_eval import load_run
+
+session = load_run("v9g")   # loads latest run matching that version
+session.status()            # progress: N/50 scored
+
+session.show_description(ROW_ID)   # original posting
+session.show_extraction(ROW_ID)    # extracted fields
+
+session.score(
+    ROW_ID,
+    company_name_accuracy=3, company_description_accuracy=2, industry_accuracy=2,
+    remote_policy_accuracy=3, employment_type_accuracy=3,
+    seniority_accuracy=3, job_family_accuracy=3, years_experience_accuracy=3,
+    education_accuracy=3, responsibilities_quality=3,
+    skills_technical_precision=3, skills_technical_recall=2,
+    skills_soft_accuracy=3, nice_to_have_accuracy=3,
+    salary_accuracy=3, null_appropriateness=3, overall=2,
+    flags=["skills_technical_incomplete"],
+)
+
+session.compare()   # mean delta and top disagreements: human − judge per dimension
+```
+
+See [`notebooks/human_eval/human_eval.ipynb`](notebooks/human_eval/human_eval.ipynb) for the guided review workflow.
 
 See [`docs/technical_report.md`](docs/technical_report.md) for full version history, design decisions, and the v10 Glassdoor hint experiment.
 

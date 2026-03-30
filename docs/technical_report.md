@@ -40,8 +40,7 @@ raw CSVs → loader.py (unify, clean) → pipeline.py (async extraction) → job
 | `src/evals/judge.py` | LLM-as-a-Judge — `gpt-4o`, `instructor`, 17-dimension scoring |
 | `src/evals/runner.py` | Eval orchestrator — sample, extract, judge, save |
 | `src/evals/report.py` | Score aggregation, group summaries, report persistence |
-| `src/evals/ground_truth_sampler.py` | Generates fixed 50-row DS annotation sample (seed=7) |
-| `src/evals/ground_truth_annotator.py` | Notebook helpers: `show`, `annotate`, `status`, `load` |
+| `src/evals/human_eval.py` | Human scoring — same 17-dimension schema as judge; `compare()` for calibration |
 
 ---
 
@@ -312,7 +311,7 @@ This is the first evaluation in the project with an objective reference — the 
 - [x] **Judge recalibrated (v9g/h/i)** — anti-anchoring on `overall` + forced recall enumeration. Overall improved +0.03–0.07 across all seeds, pct_score_1 down, n_flags halved. Forced enumeration had no effect on precision/recall (ceiling confirmed). Canonical baseline: **v9g (seed=42)**.
 - [x] `compare_versions()` removed from `report.py` — was dead code (never called, broken README example). All multi-version comparisons go through `eval_trend.py`.
 - [x] **Ground truth annotation deferred** — human annotation was evaluated and rejected as a pre-batch gate. Key reasons: (1) many fields require interpretation, making annotations a second opinion rather than objective ground truth; (2) annotator shares domain blind spots with the extractor; (3) the 9-run eval history with stable ceiling scores provides sufficient confidence. Annotation framework preserved in `tests/ground_truth_annotation/` for future use if a domain expert or downstream task demands it.
-- [ ] **Visual pre-batch audit** — read 10–15 records from v9g `extractions.jsonl` alongside raw descriptions to check for obvious extraction failures before committing to the batch.
+- [ ] **Human evaluation** — score all 50 v9g extractions using `notebooks/human_eval/human_eval.ipynb`. Produces `human_scores.jsonl` for two purposes: (1) independent extraction quality signal, (2) judge calibration check via `compare()` — dimensions where human and judge consistently diverge indicate judge bias worth fixing before the next major prompt iteration.
 - [ ] `industry_accuracy` (~2.66) is the weakest remaining dimension. **Architectural fix deferred**: a company enrichment agent (web search / company page lookup) will supply ground-truth sector context at the recommendation step, rather than inferring from recruiter-written job descriptions. No further prompt iteration planned.
 - [ ] Run full pipeline on all ~3,892 DS records (lite mode, `python -m src.data_ingestion.pipeline`). **v9 is the selected extraction prompt.**
 - [ ] Push lite dataset to HuggingFace Hub (`Alejandrofupi/ai-jie-jobs-lite`) after batch run.
