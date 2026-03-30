@@ -38,17 +38,14 @@ ai-jie/
 │       ├── judge.py                 # LLM-as-a-Judge (gpt-4o, instructor)
 │       ├── runner.py                # Eval orchestrator
 │       ├── report.py                # Score aggregation, group summaries, report persistence
-│       ├── ground_truth_sampler.py  # Generates fixed annotation sample from DS CSV
-│       └── ground_truth_annotator.py # Notebook helpers for human labelling
-├── notebooks/
-│   └── ground_truth_annotation.ipynb # Annotation notebook (show + annotate + status)
+│       └── eval_trend.py            # Reads all report.json files, writes trend.csv + plots
 ├── data/
 │   ├── raw/                         # Source CSVs (not committed); jobs_unified.csv
-│   ├── processed/                   # jobs_lite.jsonl (DS only), jobs_full.jsonl (DS+DA)
-│   └── ground_truth/                # gt_sample.jsonl — 50 DS jobs for human annotation
+│   └── processed/                   # jobs_lite.jsonl (DS only), jobs_full.jsonl (DS+DA)
 ├── eval_results/                    # Per-run eval output
 ├── tests/
-│   └── test_industry_extraction.py  # Ground-truth industry accuracy test (Glassdoor labels)
+│   ├── test_industry_extraction.py  # Ground-truth industry accuracy test (Glassdoor labels)
+│   └── ground_truth_annotation/     # Annotation framework (deferred — see technical report §9)
 ├── docs/
 │   └── technical_report.md          # Design decisions and version history
 └── requirements.txt

@@ -309,11 +309,10 @@ This is the first evaluation in the project with an objective reference — the 
 - [x] Judge bias analysis completed — precision/recall coupling, ceiling effects, overall/null_appropriateness coupling documented (§8)
 - [x] eval_trend tracker added (`src/evals/eval_trend.py`) — reads all report.json files, writes trend.csv + three trajectory plots
 - [x] runner.py updated to save both `extraction_prompt.txt` and `judge_prompt.txt` per run
-- [x] **Ground truth annotation framework created** — `ground_truth_sampler.py` generates a fixed 50-row DS sample (seed=7); `ground_truth_annotation.ipynb` provides `show` / `annotate` / `status` helpers for human labelling
 - [x] **Judge recalibrated (v9g/h/i)** — anti-anchoring on `overall` + forced recall enumeration. Overall improved +0.03–0.07 across all seeds, pct_score_1 down, n_flags halved. Forced enumeration had no effect on precision/recall (ceiling confirmed). Canonical baseline: **v9g (seed=42)**.
 - [x] `compare_versions()` removed from `report.py` — was dead code (never called, broken README example). All multi-version comparisons go through `eval_trend.py`.
-- [ ] **Complete human annotation** of the 50-row ground truth sample (`notebooks/ground_truth_annotation.ipynb`)
-- [ ] **Build ground truth evaluator** — compare v9 extractor output vs human labels field-by-field (precision/recall on skills, exact match on seniority/job_family). Gate for batch run.
+- [x] **Ground truth annotation deferred** — human annotation was evaluated and rejected as a pre-batch gate. Key reasons: (1) many fields require interpretation, making annotations a second opinion rather than objective ground truth; (2) annotator shares domain blind spots with the extractor; (3) the 9-run eval history with stable ceiling scores provides sufficient confidence. Annotation framework preserved in `tests/ground_truth_annotation/` for future use if a domain expert or downstream task demands it.
+- [ ] **Visual pre-batch audit** — read 10–15 records from v9g `extractions.jsonl` alongside raw descriptions to check for obvious extraction failures before committing to the batch.
 - [ ] `industry_accuracy` (~2.66) is the weakest remaining dimension. **Architectural fix deferred**: a company enrichment agent (web search / company page lookup) will supply ground-truth sector context at the recommendation step, rather than inferring from recruiter-written job descriptions. No further prompt iteration planned.
 - [ ] Run full pipeline on all ~3,892 DS records (lite mode, `python -m src.data_ingestion.pipeline`). **v9 is the selected extraction prompt.**
 - [ ] Push lite dataset to HuggingFace Hub (`Alejandrofupi/ai-jie-jobs-lite`) after batch run.
