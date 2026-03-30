@@ -10,7 +10,7 @@
 
 AI-JIE is a pipeline that extracts structured information from raw job postings at scale. The extracted data is stored on HuggingFace Hub and evaluated using an LLM-as-a-Judge framework to measure and improve extraction quality over time.
 
-**Data source**: Two Kaggle CSV datasets (`DataScientist.csv`, `DataAnalyst.csv`) totalling ~3,000–4,000 raw job postings.
+**Data source**: Two Kaggle CSV datasets (`DataScientist.csv`, `DataAnalyst.csv`) — 3,892 and 2,242 usable rows respectively after filtering short descriptions.
 
 **Goal**: Produce a clean, structured dataset of job postings (company, role, skills, compensation) that can feed downstream analysis and ML applications.
 
@@ -19,11 +19,13 @@ AI-JIE is a pipeline that extracts structured information from raw job postings 
 ## 2. Architecture
 
 ```
-raw CSVs → pipeline.py (async extraction) → jobs.jsonl (checkpoint)
+raw CSVs → loader.py (unify, clean) → pipeline.py (async extraction) → jobs_lite/full.jsonl
          ↓
-    HuggingFace Hub (Parquet, versioned)
+    HuggingFace Hub (Parquet, public — lite + full repos)
          ↓
     evals/runner.py → extractions + scores → eval_results/
+         ↓
+    ground_truth_sampler.py → gt_sample.jsonl → ground_truth_annotator.py (human labels)
 ```
 
 ### Modules
@@ -32,11 +34,14 @@ raw CSVs → pipeline.py (async extraction) → jobs.jsonl (checkpoint)
 |--------|----------------|
 | `src/data_ingestion/models.py` | Pydantic schemas: `Job`, `EvaluationScore`, enums |
 | `src/data_ingestion/parser.py` | LLM extraction — `gpt-4o-mini`, `instructor`, async |
-| `src/data_ingestion/pipeline.py` | Batch runner — semaphore concurrency, checkpoint/resume |
-| `src/data_ingestion/hub.py` | HuggingFace Hub push/pull |
+| `src/data_ingestion/loader.py` | Unified CSV loader — concat, -1→NaN, common columns, clean index |
+| `src/data_ingestion/pipeline.py` | Batch runner — lite/full modes, semaphore concurrency, checkpoint/resume |
+| `src/data_ingestion/hub.py` | HuggingFace Hub push/pull — separate lite/full repos, public |
 | `src/evals/judge.py` | LLM-as-a-Judge — `gpt-4o`, `instructor`, 17-dimension scoring |
 | `src/evals/runner.py` | Eval orchestrator — sample, extract, judge, save |
 | `src/evals/report.py` | Score aggregation, group summaries, version comparison |
+| `src/evals/ground_truth_sampler.py` | Generates fixed 50-row DS annotation sample (seed=7) |
+| `src/evals/ground_truth_annotator.py` | Notebook helpers: `show`, `annotate`, `status`, `load` |
 
 ---
 
@@ -69,11 +74,13 @@ raw CSVs → pipeline.py (async extraction) → jobs.jsonl (checkpoint)
 
 **Justification**: A long batch job over 3,000 records will hit rate limits or network errors. Without checkpointing, a failure at record 2,500 wastes all prior API spend and time. The `_row_id` is assigned before the async call so each coroutine has an isolated copy — ordering of completions does not matter.
 
-### 3.5 `_row_id` as pipeline artifact (not schema)
+### 3.5 Pipeline artifacts stripped before HuggingFace push
 
-**Decision**: `_row_id` is stripped before pushing to HuggingFace Hub (`push_to_hub` drops it).
+**Decision**: `_row_id` and `prompt_version` are written to every JSONL record but stripped by `push_to_hub` before uploading to HF.
 
-**Justification**: `_row_id` is a checkpoint/tracing artifact, not a feature of the job data. Keeping it in the public dataset would be confusing and wasteful.
+**Justification**:
+- `_row_id`: checkpoint/resume artifact — identifies which rows have been processed. Not a feature of the job data.
+- `prompt_version`: traceability label (e.g. `"v9"`) stamped on each record at extraction time so any downstream analysis can identify which prompt produced it. Not a job feature; stripped to keep the public schema clean. Tracked in `_PIPELINE_INTERNAL_COLS` in `hub.py`.
 
 ### 3.6 HuggingFace Hub with `datasets` library
 
@@ -234,13 +241,43 @@ The judge needs to assess nuanced extraction quality — industry classification
 
 ---
 
-## 8. Ground-Truth Testing
+## 8. Judge Bias Analysis
 
-### LLM-as-a-Judge recall limitation
+### Precision/recall coupling
 
-The judge evaluates `skills_technical_recall` by reading the description and checking whether the extractor missed any skills. This is structurally unreliable: the judge must independently enumerate all skills first, which is the same task as the extractor. Since both models share training distribution, they have the same blind spots — systematic omissions go unpenalised.
+`skills_technical_precision` and `skills_technical_recall` have been exactly equal in every run from v6 onwards (confirmed by inspecting `trend.csv`). Before v5, when the judge used its own conventions, they diverged. After v5's judge rewrite with full extraction rules, they locked.
 
-`skills_technical_recall` scores (~2.9+) are likely inflated. Useful for detecting regressions, but not as an absolute measure of completeness.
+**Root cause**: the judge cannot evaluate recall independently. To assess recall it must first enumerate all skills in the description — which is the same task as the extractor. Since both models share training distribution, they have the same blind spots. In practice the judge answers one question ("is this skills list good?") and assigns the same answer to both dimensions. They are not independent measurements.
+
+**Implication**: `skills_technical_recall` is not a reliable measure of completeness. It is useful for regression detection (if it drops, something broke) but not as an absolute completeness score. The human ground-truth eval converts recall into a real set comparison and is the correct fix.
+
+**What was not done (and why)**: forcing a two-step enumeration in the judge prompt ("first list all skills you find, then compare") would partially decouple them, but would change the judge and invalidate historical comparisons before the batch run is complete. Deferred to a future judge revision.
+
+### Ceiling effects — dimensions with no discriminative power
+
+Analysis of score ranges across all 17 runs (`max - min`):
+
+| Dimension | Range | Assessment |
+|-----------|-------|------------|
+| `company_name_accuracy` | 0.040 | Dead — always ~3.0. Company name is either present or not. |
+| `salary_accuracy` | 0.040 | Dead — always ~3.0. Salary is either stated or not. |
+| `responsibilities_quality` | 0.100 | Near-dead — instructions are clear, extractor consistently meets the bar. |
+| `employment_type_accuracy` | 0.140 | Low signal. |
+| `remote_policy_accuracy` | 0.160 | Low signal. |
+
+These dimensions consume judge attention without providing regression detection value. In a future judge revision, consider consolidating them or removing them to free attention budget for higher-signal dimensions.
+
+High-signal dimensions (range ≥ 0.35): `skills_soft_accuracy` (0.597), `null_appropriateness` (0.767), `overall` (0.720), `skills_technical_precision/recall` (~0.54–0.59), `seniority_accuracy` (0.460), `industry_accuracy` (0.360).
+
+### `overall` ↔ `null_appropriateness` coupling (r = 0.979)
+
+`overall` and `null_appropriateness` are correlated at r = 0.979 across all runs — near-perfect. `seniority_accuracy` is also tightly coupled to both (r ≈ 0.96).
+
+**Root cause**: the judge appears to anchor its holistic `overall` judgment primarily on null handling and seniority compliance, rather than forming a genuinely independent quality assessment. The `overall` dimension is supposed to capture *"does this extraction follow the rules faithfully across all fields?"* but in practice it tracks whether nulls are placed correctly and whether seniority was resolved correctly.
+
+**Implication**: `overall` does not provide additional signal beyond what `null_appropriateness` and `seniority_accuracy` already capture. For version comparisons, group-level means (Company, Role, Skills, Compensation) are more informative than the `overall` single score.
+
+**Mitigation (future judge revision)**: Rewrite the `overall` dimension instruction to explicitly say *"do not anchor on null appropriateness or any single dimension — assess holistic rule compliance across all fields equally."*
 
 ### Industry ground-truth test (`tests/test_industry_extraction.py`)
 
@@ -262,9 +299,12 @@ This is the first evaluation in the project with an objective reference — the 
 - [x] job_family title-first priority (v9)
 - [x] v9 validated on three independent seeds (v9/v9b/v9c, confirmed stable by v9d/v9e/v9f)
 - [x] Glassdoor hint experiment completed and reverted (v10/v10b/v10c)
+- [x] Judge bias analysis completed — precision/recall coupling, ceiling effects, overall/null_appropriateness coupling documented (§8)
 - [x] eval_trend tracker added (`src/evals/eval_trend.py`) — reads all report.json files, writes trend.csv + three trajectory plots
 - [x] runner.py updated to save both `extraction_prompt.txt` and `judge_prompt.txt` per run
-- [ ] **Create human-annotated ground-truth eval set** (20–30 postings, all fields manually labelled) before running the full batch. The LLM judge cannot reliably measure recall — it shares blind spots with the extractor. This is the most important quality gate before batch mode.
+- [x] **Ground truth annotation framework created** — `ground_truth_sampler.py` generates a fixed 50-row DS sample (seed=7); `ground_truth_annotation.ipynb` provides `show` / `annotate` / `status` helpers for human labelling
+- [ ] **Complete human annotation** of the 50-row ground truth sample (in progress)
+- [ ] **Build ground truth evaluator** — compare v9 extractor output vs human labels field-by-field (precision/recall on skills, exact match on seniority/job_family). Gate for batch run.
 - [ ] `industry_accuracy` (2.66–2.76) is the weakest remaining dimension. The ground-truth test (`tests/test_industry_extraction.py`) confirmed extractor reaches 36% exact-match without hints. Judge scores are unreliable for this dimension due to Glassdoor taxonomy noise. Acceptable for batch run; revisit with a cleaner ground-truth source.
-- [ ] Run full pipeline on all ~3,900 records. **v9 is the selected prompt.**
-- [ ] Push full dataset to HuggingFace Hub (`Alejandrofupi/ai-jie-jobs`) after batch run.
+- [ ] Run full pipeline on all ~3,900 DS records (lite mode). **v9 is the selected prompt.**
+- [ ] Push lite dataset to HuggingFace Hub (`Alejandrofupi/ai-jie-jobs-lite`) after batch run.

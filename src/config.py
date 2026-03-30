@@ -22,5 +22,4 @@ EVALS_RESULTS_DIR = PROJECT_ROOT / "eval_results"
 GROUND_TRUTH_DIR = DATA_DIR / "ground_truth"
 GROUND_TRUTH_SAMPLE_FILE = GROUND_TRUTH_DIR / "gt_sample.jsonl"
 
-# HuggingFace Hub
-HF_REPO_JOBS = "Alejandrofupi/ai-jie-jobs"
+# HuggingFace Hub — see src/data_ingestion/hub.py for HF_REPO_LITE / HF_REPO_FULL

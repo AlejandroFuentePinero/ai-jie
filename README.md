@@ -31,16 +31,21 @@ ai-jie/
 │   ├── data_ingestion/
 │   │   ├── models.py                # Pydantic schemas (Job, EvaluationScore)
 │   │   ├── parser.py                # LLM extraction (gpt-4o-mini, instructor)
-│   │   ├── pipeline.py              # Async batch runner with checkpoint/resume
-│   │   └── hub.py                   # HuggingFace Hub push/pull
+│   │   ├── pipeline.py              # Async batch runner with checkpoint/resume (lite/full modes)
+│   │   ├── loader.py                # Unified CSV loader — concat, -1→NaN, clean index
+│   │   └── hub.py                   # HuggingFace Hub push/pull (lite + full repos)
 │   └── evals/
 │       ├── judge.py                 # LLM-as-a-Judge (gpt-4o, instructor)
 │       ├── runner.py                # Eval orchestrator
-│       └── report.py                # Score aggregation and version comparison
-├── notebooks/                       # Exploration notebooks
+│       ├── report.py                # Score aggregation and version comparison
+│       ├── ground_truth_sampler.py  # Generates fixed annotation sample from DS CSV
+│       └── ground_truth_annotator.py # Notebook helpers for human labelling
+├── notebooks/
+│   └── ground_truth_annotation.ipynb # Annotation notebook (show + annotate + status)
 ├── data/
-│   ├── raw/                         # Source CSVs (not committed)
-│   └── processed/                   # Extraction checkpoint (jobs.jsonl)
+│   ├── raw/                         # Source CSVs (not committed); jobs_unified.csv
+│   ├── processed/                   # jobs_lite.jsonl (DS only), jobs_full.jsonl (DS+DA)
+│   └── ground_truth/                # gt_sample.jsonl — 50 DS jobs for human annotation
 ├── eval_results/                    # Per-run eval output
 ├── tests/
 │   └── test_industry_extraction.py  # Ground-truth industry accuracy test (Glassdoor labels)
@@ -72,30 +77,46 @@ cp .env.example .env
 
 ### Run the extraction pipeline
 
-Processes all raw job postings with async concurrency and writes results to JSONL. Resumes from checkpoint if interrupted.
+Two modes — lite (DS jobs only, default) and full (DS + DA):
 
 ```bash
-python -m src.data_ingestion
+# Lite — DataScientist.csv only → data/processed/jobs_lite.jsonl
+python -m src.data_ingestion.pipeline
+
+# Full — DataScientist.csv + DataAnalyst.csv → data/processed/jobs_full.jsonl
+python -m src.data_ingestion.pipeline --full
 ```
+
+Resumes from checkpoint if interrupted. Each record is stamped with `prompt_version` for traceability.
 
 Or from Python:
 
 ```python
-import asyncio, pandas as pd
-from src.data_ingestion import run_pipeline
-from src.config import JOBS_JSONL_FILE
+import asyncio
+from src.data_ingestion.loader import load_raw_jobs
+from src.data_ingestion.pipeline import run_pipeline
+from src.config import JOBS_LITE_JSONL_FILE
 
-df = pd.read_csv("data/raw/DataScientist.csv")
-results = asyncio.run(run_pipeline(df, output_path=JOBS_JSONL_FILE))
+df = load_raw_jobs(da_path=False)   # DS only; omit da_path=False for full
+results = asyncio.run(run_pipeline(df, output_path=JOBS_LITE_JSONL_FILE))
+```
+
+### Build the unified dataset
+
+Merges both CSVs, drops artifact columns, replaces -1 sentinels with NaN, and saves to `data/raw/jobs_unified.csv`:
+
+```bash
+python -m src.data_ingestion.loader
 ```
 
 ### Push to / load from HuggingFace Hub
 
 ```python
-from src.data_ingestion import push_to_hub, load_from_hub
+from src.data_ingestion.hub import push_to_hub, load_from_hub, HF_REPO_LITE, HF_REPO_FULL
 
-push_to_hub(results_df)          # uploads as Parquet to HF Hub
-df = load_from_hub()             # pulls back as DataFrame
+push_to_hub(results_df)                        # lite repo (public)
+push_to_hub(results_df, repo_id=HF_REPO_FULL)  # full repo (public)
+df = load_from_hub()                           # pulls lite dataset
 ```
 
 ### Run evaluation
@@ -135,6 +156,7 @@ Each job posting is parsed into the following structure:
 
 Key rules enforced by the extraction prompt:
 - `seniority` follows a strict priority ladder: explicit title keyword → years of experience → responsibilities tone → `"unknown"`
+- `job_family` is title-first: a clear title keyword always overrides responsibilities-based inference. `"Data Analyst"` / `"Analytics Engineer"` → `data_analytics`
 - `industry` reflects the company's business sector, not the technology used (e.g. a bank hiring a data scientist → `"Financial Services"`, not `"Information Technology"`)
 - `skills_technical` includes all named tools, platform categories (cloud computing, BI tools), and methodology terms (machine learning, NLP, A/B testing)
 - `nice_to_have` only from text using explicit keywords: "preferred", "nice to have", "a plus", "bonus", "ideally", "desirable"
@@ -209,7 +231,11 @@ See [`docs/technical_report.md`](docs/technical_report.md) for full version hist
 ## Data
 
 Source data is not committed to this repository. Place the raw CSVs in `data/raw/`:
-- `DataScientist.csv`
-- `DataAnalyst.csv`
+- `DataScientist.csv` — 3,892 usable rows (DS roles)
+- `DataAnalyst.csv` — 2,242 usable rows (DA roles)
 
-The processed dataset is available on HuggingFace Hub: [Alejandrofupi/ai-jie-jobs](https://huggingface.co/datasets/Alejandrofupi/ai-jie-jobs) (private).
+Run `python -m src.data_ingestion.loader` once to generate `data/raw/jobs_unified.csv` (used for exploration; the pipeline reads raw CSVs directly).
+
+Processed datasets on HuggingFace Hub (public):
+- Lite (DS only): `Alejandrofupi/ai-jie-jobs-lite`
+- Full (DS + DA): `Alejandrofupi/ai-jie-jobs-full`

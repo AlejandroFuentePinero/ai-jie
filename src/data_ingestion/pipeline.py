@@ -6,8 +6,11 @@ Usage (script):
 
 Usage (notebook / programmatic):
     import asyncio
+    from src.data_ingestion.loader import load_raw_jobs
     from src.data_ingestion.pipeline import run_pipeline
-    results_df = asyncio.run(run_pipeline(df, output_path=Path("data/processed/jobs.jsonl")))
+    from src.config import JOBS_LITE_JSONL_FILE
+    df = load_raw_jobs(da_path=False)
+    results_df = asyncio.run(run_pipeline(df, output_path=JOBS_LITE_JSONL_FILE))
 """
 
 import asyncio
@@ -27,17 +30,20 @@ async def run_pipeline(
     df: pd.DataFrame,
     output_path: Path,
     concurrency: int = 20,
+    prompt_version: str = "v9",
 ) -> pd.DataFrame:
     """
     Extract structured data from all rows in df using async concurrency.
 
     Args:
-        df:           DataFrame with columns: title, description, location.
-                      Must have a stable integer index (reset_index() first if needed).
-        output_path:  Path to the output JSONL file. Results are appended
-                      incrementally — safe to interrupt and resume.
-        concurrency:  Max concurrent API calls. Default 20 is safe for
-                      OpenAI Tier 1 (500 RPM). Raise to 80+ on Tier 2.
+        df:             DataFrame with columns: title, description, location.
+                        Must have a stable integer index (reset_index() first if needed).
+        output_path:    Path to the output JSONL file. Results are appended
+                        incrementally — safe to interrupt and resume.
+        concurrency:    Max concurrent API calls. Default 20 is safe for
+                        OpenAI Tier 1 (500 RPM). Raise to 80+ on Tier 2.
+        prompt_version: Label for the extractor prompt used (e.g. "v9"). Stored
+                        in each record for traceability; stripped before HF push.
 
     Returns:
         DataFrame of all successfully extracted records (including prior runs).
@@ -79,7 +85,7 @@ async def run_pipeline(
                 extracted = await parse_posting_async(
                     row["title"], row["description"], row["location"],
                 )
-                record = {"_row_id": row_id, **extracted.model_dump()}
+                record = {"_row_id": row_id, "prompt_version": prompt_version, **extracted.model_dump()}
                 out_file.write(json.dumps(record, default=str) + "\n")
                 out_file.flush()
                 return True
