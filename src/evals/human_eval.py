@@ -25,7 +25,7 @@ Usage (notebook):
         company_name_accuracy=3,
         ...
         overall=2,
-        flags=["industry_misclassified"],
+        flags=["seniority_wrong"],
     )
 
     session.compare()
@@ -131,10 +131,10 @@ class HumanEvalSession:
         fields = {k: v for k, v in ext.items() if k not in skip}
 
         groups = {
-            "Company": ["company_name", "company_description", "industry", "remote_policy", "employment_type"],
+            "Company": ["company_name", "company_description", "remote_policy", "employment_type"],
             "Role": ["seniority", "job_family", "years_experience_min", "years_experience_max",
                      "education_required", "key_responsibilities"],
-            "Skills": ["skills_technical", "skills_soft", "nice_to_have"],
+            "Skills": ["skills_required", "skills_preferred", "skills_soft"],
             "Compensation": ["salary_min", "salary_max", "salary_currency", "salary_period"],
         }
 
@@ -166,7 +166,6 @@ class HumanEvalSession:
         *,
         company_name_accuracy: int,
         company_description_accuracy: int,
-        industry_accuracy: int,
         remote_policy_accuracy: int,
         employment_type_accuracy: int,
         seniority_accuracy: int,
@@ -174,10 +173,9 @@ class HumanEvalSession:
         years_experience_accuracy: int,
         education_accuracy: int,
         responsibilities_quality: int,
-        skills_technical_precision: int,
-        skills_technical_recall: int,
+        skills_required_accuracy: int,
+        skills_preferred_accuracy: int,
         skills_soft_accuracy: int,
-        nice_to_have_accuracy: int,
         salary_accuracy: int,
         null_appropriateness: int,
         overall: int,
@@ -192,7 +190,7 @@ class HumanEvalSession:
           1 = clearly wrong, hallucinated, or significant rule violation
 
         flags: short strings describing specific issues, e.g.
-          ["industry_misclassified", "skills_technical_incomplete"]
+          ["seniority_wrong", "skills_required_incomplete"]
         """
         if row_id not in self._extractions:
             print(f"⚠  row_id {row_id} not in extractions — check your row_id.")
@@ -206,7 +204,6 @@ class HumanEvalSession:
         score_obj = EvaluationScore(
             company_name_accuracy=company_name_accuracy,
             company_description_accuracy=company_description_accuracy,
-            industry_accuracy=industry_accuracy,
             remote_policy_accuracy=remote_policy_accuracy,
             employment_type_accuracy=employment_type_accuracy,
             seniority_accuracy=seniority_accuracy,
@@ -214,10 +211,9 @@ class HumanEvalSession:
             years_experience_accuracy=years_experience_accuracy,
             education_accuracy=education_accuracy,
             responsibilities_quality=responsibilities_quality,
-            skills_technical_precision=skills_technical_precision,
-            skills_technical_recall=skills_technical_recall,
+            skills_required_accuracy=skills_required_accuracy,
+            skills_preferred_accuracy=skills_preferred_accuracy,
             skills_soft_accuracy=skills_soft_accuracy,
-            nice_to_have_accuracy=nice_to_have_accuracy,
             salary_accuracy=salary_accuracy,
             null_appropriateness=null_appropriateness,
             overall=overall,

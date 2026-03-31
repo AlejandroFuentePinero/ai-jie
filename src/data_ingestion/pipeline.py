@@ -82,8 +82,10 @@ async def run_pipeline(
     async def process_row(row_id: int, row: pd.Series) -> bool:
         async with sem:
             try:
+                _sector = row.get("sector")
                 extracted = await parse_posting_async(
                     row["title"], row["description"], row["location"],
+                    sector=None if pd.isna(_sector) else _sector,
                 )
                 record = {"_row_id": row_id, "prompt_version": prompt_version, **extracted.model_dump()}
                 out_file.write(json.dumps(record, default=str) + "\n")

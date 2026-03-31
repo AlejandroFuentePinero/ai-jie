@@ -1,6 +1,6 @@
 from enum import Enum
 from typing import Optional
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 
 class Seniority(str, Enum):
@@ -30,33 +30,41 @@ class JobFamily(str, Enum):
 class Job(BaseModel):
     """A structured representation of a job posting."""
 
+    @field_validator("*", mode="before")
+    @classmethod
+    def _coerce_null_string(cls, v):
+        """Normalise the string 'null' to None so stray LLM outputs don't pollute fields."""
+        if v == "null":
+            return None
+        return v
+
     # --- Raw input (passthrough) ---
     title: str
     description: str
     location: str
+    sector: Optional[str] = None  # Glassdoor broad sector — passed through, not extracted
 
     # --- Company ---
-    company_name: Optional[str] = None
+    company_name: Optional[str] = Field(
+        None,
+        description="The name of the hiring company. May appear anywhere in the posting — header, 'About us' section, body, or footer. Extract the canonical company name, not a department or team (e.g. 'IBM' not 'IBM's AI Research Group'). Null only if genuinely not mentioned anywhere.",
+    )
     company_description: Optional[str] = Field(
         None,
-        description="One sentence about the company, usually at the start of the posting.",
-    )
-    industry: Optional[str] = Field(
-        None,
-        description="Industry or domain e.g. fintech, healthcare, SaaS, government.",
+        description="Always null — populated by a downstream enrichment agent, not extracted from the posting.",
     )
 
     remote_policy: Optional[str] = Field(
         None, description="Remote, hybrid, or on-site — as stated in the posting."
     )
     employment_type: Optional[str] = Field(
-        None, description="Full-time, part-time, contract, or casual."
+        None, description="Full-time, part-time, contract, casual, or temporary — as stated in the posting. 'Temporary' may appear in the title or body."
     )
 
     # --- Role ---
     seniority: Optional[Seniority] = Field(
         None,
-        description="Title keyword takes priority. Fall back to years of experience, then responsibilities tone, then unknown.",
+        description="Explicit seniority anywhere in title or description takes absolute priority. When not explicit: start from years (0-1→junior, 2-4→mid, 5-7→senior, 8+→lead), then adjust up if the described scope clearly exceeds what years suggest (e.g. mentoring juniors, owning architecture, managing direct reports). Unknown if still unclear.",
     )
     job_family: Optional[JobFamily] = Field(
         None, description="Title keyword takes priority. Use responsibilities as tiebreaker when the title is ambiguous."
@@ -65,11 +73,11 @@ class Job(BaseModel):
         None, description="Minimum years of experience explicitly stated."
     )
     years_experience_max: Optional[int] = Field(
-        None, description="Maximum years of experience if a range is stated."
+        None, description="Maximum years of experience if a range is stated. Null for open-ended ranges ('3+ years', 'at least 5 years').",
     )
     key_responsibilities: list[str] = Field(
         default_factory=list,
-        description="Top 3-5 core responsibilities as concrete actions.",
+        description="Up to 7 concrete responsibilities explicitly stated in the posting. Verb-led. No inferred or constructed items. If more than 7 are stated, select the first 7 stated.",
     )
     education_required: Optional[str] = Field(
         None,
@@ -77,17 +85,17 @@ class Job(BaseModel):
     )
 
     # --- Skills ---
-    skills_technical: Optional[list[str]] = Field(
+    skills_required: Optional[list[str]] = Field(
         None,
-        description="All named tools, technologies, platform categories, and methodology terms from the full document. Exhaustive. Exclude only pure marketing filler.",
+        description="Technical skills, tools, technologies, methodology terms, and domain knowledge areas the posting presents as required or expected. Includes precise tokens (Python, SQL) and broader knowledge domains (e.g. 'investment finance', 'security analytics'). Scan the entire posting including responsibilities — tools named in responsibility bullets are implicitly required skills. Exhaustive. Soft/interpersonal skills never go here — they belong in skills_soft regardless of where they appear in the posting.",
+    )
+    skills_preferred: Optional[list[str]] = Field(
+        None,
+        description="Technical skills, tools, technologies, and domain expertise areas the posting presents as optional or desirable. Use semantic judgment to identify optional framing. Null if no optional framing exists.",
     )
     skills_soft: Optional[list[str]] = Field(
         None,
-        description="Interpersonal or organisational skills the employer genuinely emphasises. Concise phrases (2–7 words). Null only if the posting contains no meaningful soft skill signal.",
-    )
-    nice_to_have: Optional[list[str]] = Field(
-        None,
-        description="Skills from sections or sentences with explicit preferred/bonus language only. Concise skill names.",
+        description="Interpersonal or organisational skills the employer genuinely emphasises. Concise phrases (2–7 words) — condense, do not copy verbatim sentences. Covers all soft skills regardless of whether they are framed as required or preferred. Null only if the posting contains no meaningful soft skill signal.",
     )
 
     # --- Compensation ---
@@ -104,8 +112,7 @@ class Job(BaseModel):
 class EvaluationScore(BaseModel):
     # Company
     company_name_accuracy: int  # 1-3: correctly extracted or null if not stated
-    company_description_accuracy: int  # 1-3: one sentence, from the text, not invented
-    industry_accuracy: int  # 1-3: matches company industry not role domain
+    company_description_accuracy: int  # 1-3: always null (enrichment agent handles)
     remote_policy_accuracy: int  # 1-3: remote/hybrid/on-site correctly identified
     employment_type_accuracy: int  # 1-3: full-time/contract etc correctly identified
     # Role
@@ -117,10 +124,9 @@ class EvaluationScore(BaseModel):
     education_accuracy: int  # 1-3: only required education, not preferred
     responsibilities_quality: int  # 1-3: concrete verb-led actions, no filler
     # Skills
-    skills_technical_precision: int  # 1-3: no vague phrases, only named tools
-    skills_technical_recall: int  # 1-3: obvious tools not missed
-    skills_soft_accuracy: int  # 1-3: only explicitly named soft skills
-    nice_to_have_accuracy: int  # 1-3: only skills explicitly marked as optional
+    skills_required_accuracy: int  # 1-3: required technical skills correctly and completely extracted
+    skills_preferred_accuracy: int  # 1-3: preferred/optional technical skills correctly extracted; null ok if none
+    skills_soft_accuracy: int  # 1-3: soft skills the employer emphasises, concise phrases
     # Compensation
     salary_accuracy: int  # 1-3: only extracted if explicitly stated
     # Overall

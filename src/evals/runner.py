@@ -51,9 +51,10 @@ async def run_eval(
     seed: int = 42,
     prompt_version: str = "v1",
     concurrency: int = 3,
+    judge: bool = True,
 ) -> pd.DataFrame:
     """
-    Run a full evaluation cycle on a fixed sample.
+    Run extraction (and optionally judging) on a fixed sample.
 
     Args:
         df:             DataFrame with columns: title, description, location.
@@ -64,9 +65,11 @@ async def run_eval(
         concurrency:    Max concurrent API calls. Default 3 avoids gpt-4o rate limits
                         (Tier 1: 500 RPM, but gpt-4o shares quota with other calls).
                         Raise to 5-8 on Tier 2+.
+        judge:          Whether to run the LLM judge. Default True. Pass False to produce
+                        extractions.jsonl only (for human eval).
 
     Returns:
-        DataFrame with input fields + extraction fields + score fields merged.
+        DataFrame with input fields + extraction fields (+ score fields when judge=True).
     """
     # ── Setup output directory ─────────────────────────────────────────────
     timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
@@ -78,9 +81,10 @@ async def run_eval(
     sample = df.sample(min(n, len(df)), random_state=seed).reset_index(drop=True)
     sample.index.name = "_row_id"
 
+    _sample_cols = [c for c in ["title", "description", "location", "sector"] if c in sample.columns]
     _write_jsonl(
         run_dir / "sample.jsonl",
-        [{"_row_id": i, **row[["title", "description", "location"]].to_dict()}
+        [{"_row_id": i, **row[_sample_cols].to_dict()}
          for i, row in sample.iterrows()],
     )
 
@@ -92,13 +96,16 @@ async def run_eval(
         "n_sampled": len(sample),
         "seed": seed,
         "extraction_model": EXTRACTION_MODEL,
-        "judge_model": JUDGE_MODEL,
+        "judge_model": JUDGE_MODEL if judge else None,
         "concurrency": concurrency,
     }
     (run_dir / "metadata.json").write_text(json.dumps(metadata, indent=2))
     (run_dir / "extraction_prompt.txt").write_text(EXTRACTION_PROMPT)
-    (run_dir / "judge_prompt.txt").write_text(JUDGE_PROMPT)
-    print(f"  metadata.json + extraction_prompt.txt + judge_prompt.txt saved")
+    saved_files = "metadata.json + extraction_prompt.txt"
+    if judge:
+        (run_dir / "judge_prompt.txt").write_text(JUDGE_PROMPT)
+        saved_files += " + judge_prompt.txt"
+    print(f"  {saved_files} saved")
 
     # ── Extract + Judge (concurrent) ──────────────────────────────────────
     extraction_records: list[dict] = []
@@ -111,8 +118,10 @@ async def run_eval(
         async with sem:
             # Step 1 — extraction
             try:
+                _sector = row.get("sector")
                 extracted = await parse_posting_async(
                     row["title"], row["description"], row["location"],
+                    sector=None if pd.isna(_sector) else _sector,
                 )
             except Exception as exc:
                 failures.append({
@@ -124,7 +133,16 @@ async def run_eval(
                 logger.warning("Row %d extraction failed: %s", row_id, exc)
                 return
 
-            # Step 2 — judge
+            extraction_records.append({
+                "_row_id": row_id,
+                "prompt_version": prompt_version,
+                **extracted.model_dump(),
+            })
+
+            if not judge:
+                return
+
+            # Step 2 — judge (optional)
             try:
                 scores = await judge_extraction_async(
                     row["title"], row["description"], extracted,
@@ -139,30 +157,31 @@ async def run_eval(
                 logger.warning("Row %d judge failed: %s", row_id, exc)
                 return
 
-            extraction_records.append({
-                "_row_id": row_id,
-                "prompt_version": prompt_version,
-                **extracted.model_dump(),
-            })
             score_records.append({
                 "_row_id": row_id,
                 **scores.model_dump(),
             })
 
+    label = "Extract" if not judge else "Extract + Judge"
     tasks = [process_row(i, row) for i, row in sample.iterrows()]
-    await tqdm_asyncio.gather(*tasks, desc="Extract + Judge")
+    await tqdm_asyncio.gather(*tasks, desc=label)
 
     # ── Persist results ────────────────────────────────────────────────────
     _write_jsonl(run_dir / "extractions.jsonl", extraction_records)
-    _write_jsonl(run_dir / "scores.jsonl", score_records)
 
     if failures:
         _write_jsonl(run_dir / "failures.jsonl", failures)
         print(f"\n✗ {len(failures)} failures logged to failures.jsonl")
 
-    # ── Report ─────────────────────────────────────────────────────────────
-    scores_df = pd.DataFrame(score_records)
     extractions_df = pd.DataFrame(extraction_records)
+
+    if not judge:
+        print(f"\n  Judge skipped — extractions.jsonl ready for human eval ({len(extraction_records)} records)")
+        return extractions_df
+
+    # ── Report ─────────────────────────────────────────────────────────────
+    _write_jsonl(run_dir / "scores.jsonl", score_records)
+    scores_df = pd.DataFrame(score_records)
 
     print_summary(scores_df, n_failures=len(failures))
     report = build_report(scores_df)

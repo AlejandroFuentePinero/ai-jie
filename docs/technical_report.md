@@ -297,7 +297,208 @@ This is the first evaluation in the project with an objective reference — the 
 
 ---
 
-## 9. Outstanding Issues / Next Steps
+## 9. Stage 2 — Schema Redesign and Prompt Engineering (v16+)
+
+### 9.1 Why v9 was not selected for the full batch run
+
+After completing the v9 evaluation series, a human audit of the v9g extractions revealed three systematic problems that had been masked by the LLM-as-a-Judge:
+
+1. **skills_technical/nice_to_have boundary failure**: The extractor frequently duplicated items across both fields or made inconsistent required/preferred judgements. The distinction between `skills_technical` (required) and `nice_to_have` (preferred) was structurally ambiguous — the model had no reliable signal to distinguish them from context alone.
+
+2. **Soft skills contaminating skills_technical**: Items like "communication", "leadership", and "facilitation" regularly appeared in `skills_technical`. The judge was not catching this as an error.
+
+3. **`industry` field unreliable**: The Glassdoor `Industry` label was the only available ground truth, but the label itself is noisy (staffing agencies labelled as the industry they recruit for). The judge was evaluating against its own interpretation, not any objective standard, making `industry_accuracy` meaningless as a signal.
+
+**Decision**: Drop `industry`, redesign the skills schema, and treat v9g as a stage 1 reference point rather than the production prompt.
+
+### 9.2 Schema redesign (v16 breaking change)
+
+The skills schema was redesigned from two fields to three:
+
+| Old (v1–v15) | New (v16+) |
+|---|---|
+| `skills_technical` — required tech skills | `skills_required` — required tech + domain skills |
+| `nice_to_have` — preferred skills | `skills_preferred` — optional/desirable skills |
+| `skills_soft` — soft skills | `skills_soft` — interpersonal skills (condensed phrases) |
+| `industry` — company sector | *(removed)* |
+
+The key improvements:
+- `skills_required` explicitly includes **domain expertise areas** (investment finance, security analytics, regulatory compliance) alongside precise tool tokens — senior roles often have no listed tool requirements, only domain competencies.
+- A **HARD BOUNDARY** between `skills_required` and `skills_soft` prevents soft skills from leaking into technical skill lists.
+- `skills_soft` requires **condensed phrases (2–7 words)**, not verbatim sentences.
+- All three skill fields are evaluated by the judge as a single cohesive group.
+
+**Note**: v16+ scores are not comparable to v1–v15. The schema change resets the baseline.
+
+### 9.3 Judge limitations identified through human evaluation
+
+A human evaluation of 10 v20 extractions (seed=42) revealed systematic divergences between human and judge scores:
+
+| Dimension | Human avg | Judge avg | Gap |
+|---|---|---|---|
+| `skills_soft_accuracy` | 3.0 | 1.9 | −1.1 |
+| `seniority_accuracy` | 3.0 | 2.6 | −0.4 |
+| `skills_required_accuracy` | 2.8 | 2.2 | −0.6 |
+| `skills_preferred_accuracy` | 2.8 | 2.5 | −0.3 |
+
+Human assessment: **extraction quality was genuinely excellent** across all 10 reviewed jobs. The judge was systematically over-penalising.
+
+**Root causes identified:**
+
+1. **skills_soft format penalty too harsh**: The judge was scoring 1 (clearly wrong) on items that were correct in content but slightly verbose in format. Fix: format issues cap the score at 2; score 1 is reserved for content errors (Agile/Scrum in this field, or null when the posting clearly emphasises soft skills).
+
+2. **Seniority inference over-penalisation**: The judge was calling reasonable inferences wrong (scoring 1 on rows where human scored 3). Fix: score 1 only when the extracted value is **clearly contradicted** by explicit signals in the posting.
+
+3. **Abstract rubrics insufficient for calibration**: Without concrete anchor examples, the judge drifted toward strictness on interpretive fields. Few-shot calibration examples would improve this further, but were not added to avoid overfitting to the specific 10-row human eval sample.
+
+**Approach taken**: Fix the structural flaws in the judge (score-1 thresholds, format vs content separation) rather than adding specific examples, to preserve generalisation.
+
+### 9.4 Prompt engineering decisions (v16–v21)
+
+**Decisions confirmed during this stage:**
+
+- **"Do not paraphrase or interpret" removed**: This instruction conflicted with legitimate semantic judgment required for seniority inference, skills classification, and optional framing detection. Replaced with a nuanced rule: semantic judgment is explicitly allowed only where the field rules require it; all other fields extract faithfully.
+
+- **Responsibilities scanning for implicit skills**: A common failure mode was the extractor missing tools named in responsibility bullets (e.g. "Optimise jobs to utilise Kafka, Hadoop, Spark Streaming and Kubernetes" — all four are required skills). Explicit instruction added: scan the entire posting including responsibilities; tools named there are implicitly required.
+
+- **"Most important 7" → "first 7 listed"**: Selecting the "most important" responsibilities introduces run-to-run variance. The first 7 listed is consistent and approximately correct (postings lead with their most important responsibilities).
+
+- **Emphasis words ≠ required**: "Strong knowledge of X" or "proficiency in Y" describe the desired level of a skill, not whether it is required. Added to both skills_required and skills_preferred to prevent misclassification based on wording intensity alone.
+
+- **AVP → senior (not director)**: In banking and finance, AVP (Associate Vice President) is an early-to-mid career title. The original mapping (AVP → director) produced systematic errors for finance-sector postings.
+
+- **"Data Scientist" treated as ambiguous**: Despite having a clear title keyword, "Data Scientist" responsibilities span data_science, data_engineering, and ml_engineering. Explicitly noted as an exception to the title-first rule.
+
+- **Product management under management**: Product Manager titles don't trigger the `manager` seniority path (not a people-management role) and map to the `management` job_family via the product management clarification added to that category's description.
+
+### 9.5 Stage 2 version trajectory
+
+| Version | overall | skills_required | skills_preferred | skills_soft | responsibilities | n_flags | Key change |
+|---------|---------|----------------|-----------------|-------------|-----------------|---------|------------|
+| v16 | 2.88 | 2.78 | 2.80 | 2.52 | 2.98 | 15 | Schema redesign baseline |
+| v17 | 2.76 | 2.44 | 2.76 | 2.62 | 2.94 | 36 | company_name extraction fix; judge stricter post-redesign |
+| v18 | 2.68 | 2.44 | 2.80 | 2.42 | 2.88 | 42 | HARD BOUNDARY for soft skills in skills_required |
+| v19 | 2.68 | 2.34 | 2.72 | 2.30 | 2.88 | 44 | skills_soft condensing instruction added |
+| v21 | **2.80** | 2.48 | **2.82** | 2.48 | **3.00** | **25** | Full prompt polish + judge recalibration |
+
+v17–v19 downward trend was driven by two compounding factors: (1) the judge became stricter after the schema change exposed new failure modes it could evaluate, and (2) the HARD BOUNDARY instruction caused format regressions in skills_soft (verbatim sentences instead of condensed phrases). v21 recovers through judge recalibration and prompt refinement.
+
+**v21 notable results**:
+- `responsibilities_quality` hits 3.00 — first perfect score for this dimension
+- `skills_preferred_accuracy` at 2.82 — new stage 2 high
+- n_flags down from 44 (v19) to 25 — 43% reduction
+- Human evaluation confirmed extraction quality is genuinely excellent; remaining judge gaps are in interpretive fields (skills_soft, seniority)
+
+**Current canonical reference: v21 (seed=42)**
+
+### 9.6 Plateau analysis — v22, v20b (2026-03-31)
+
+After v21, two further experiments were run to understand whether the skills_required regression from v16 (2.78) could be recovered:
+
+**v22 — temperature=0.3 (extractor only, judge unchanged)**
+
+Hypothesis: temperature=0 forces overly literal extraction for a task requiring semantic judgment. Raising temperature might improve skills allocation.
+
+Result: skills regressed across all three skills dimensions, overall unchanged at 2.80.
+
+| | v21 (t=0) | v22 (t=0.3) |
+|---|---|---|
+| overall | 2.80 | 2.80 |
+| skills_required | 2.48 | 2.40 |
+| skills_preferred | 2.82 | 2.74 |
+| skills_soft | 2.48 | 2.30 |
+
+Temperature adds variance but the model makes worse allocation decisions on average, not better. Hypothesis rejected — the issue is not literal extraction. Reverted to temperature=0.
+
+**v20b — v20 prompt re-run with v21 judge**
+
+To determine whether the v21 extractor changes (responsibilities scanning paragraph, emphasis words note) were helping or hurting relative to v20, v20 was re-run against the same seed=42 sample using the current (v21-calibrated) judge.
+
+| | v16 | v20b | v21 | v22 |
+|---|---|---|---|---|
+| overall | 2.88 | 2.80 | 2.80 | 2.80 |
+| skills_required | 2.78 | 2.46 | 2.48 | 2.40 |
+| skills_preferred | 2.80 | 2.80 | 2.82 | 2.74 |
+| skills_soft | 2.52 | **2.52** | 2.48 | 2.30 |
+| n_flags | 15 | 21 | 25 | 21 |
+
+**Key finding**: three structurally different prompts (v20b, v21, v22) all plateau at overall=2.80. The v21 extractor additions had no meaningful effect on skills_required (2.46 vs 2.48) and slightly hurt skills_soft (2.52 → 2.48). v20b recovers skills_soft to 2.52, matching the v16 baseline.
+
+**Interpretation**: The skills_required gap from v16 (2.78 → ~2.46) is persistent across all prompt variants, including the original v20. This suggests the gap is not caused by the v21 extractor additions but rather by judge drift following the schema change — the v21-calibrated judge applies a stricter standard to skills_required than the v16-era judge did. Further prompt iteration within this parameter space is unlikely to recover the gap.
+
+**Initial decision**: batch with v20b. However, this decision was based partly on a single edge case (the Kafka/Hadoop posting performing worse in v21 than v20). Given inherent LLM variability even at temperature=0, a single posting is not a reliable signal.
+
+**Revised decision**: restore v21 prompt (= v22 prompt text), conduct a final critical review, apply only changes that could meaningfully mislead the model, then run extraction-only as v23. A proper manual evaluation on the first 10 jobs will make the final batch prompt decision on human evidence, not judge scores or individual edge cases.
+
+**Current canonical reference: v21 (seed=42, overall=2.80) — pending manual eval of v23**
+
+### 9.7 Final prompt review — v23 (2026-03-31)
+
+After restoring the v21/v22 prompt, a final exhaustive review was conducted before batch commit, targeting seniority and skills fields (the highest-stakes dimensions). The goal: identify any phrasing that could cause the model to be biased, confused, or misled — particularly rules that feel like hard constraints when they should be guiding heuristics.
+
+Three targeted fixes were applied:
+
+**1. Seniority: "Lead" as verb vs. title keyword (step 1)**
+
+Original: The list of title patterns did not distinguish "Lead" appearing as a title keyword from "Lead" appearing as a verb in the description body (e.g., "lead a team of analysts", "will lead cross-functional projects"). A model primed by step 1 could incorrectly trigger on these.
+
+Fix: Added an explicit carve-out — "The patterns below apply to the job title; 'Lead' and similar words used as verbs in the description body are NOT seniority signals."
+
+**2. Seniority: Senior + Manager title conflict (step 1)**
+
+Original: The rule for "Manager" in the title returned `manager`, but the rule for "Senior" also returned `senior`. For titles like "Senior Analytics Manager" or "Senior Engineering Manager", a model applying both rules faces ambiguity.
+
+Fix: Added an explicit tie-breaker — "When a title combines a rank modifier with a management keyword (e.g. 'Senior Analytics Manager', 'Senior Engineering Manager'), the management keyword takes precedence — return manager."
+
+**3. skills_required: unqualified "leadership" exclusion**
+
+Original: The exclusion list for soft skills said "leadership" must not appear in skills_required. This was too broad — concrete leadership experience stated as a role requirement (e.g., "experience leading data engineering teams", "technical leadership of ML projects") is a domain competency, not a soft skill.
+
+Fix: Qualified the exclusion with an explicit distinction — "leadership as an interpersonal trait (e.g. 'strong leadership skills', 'natural leader') — note: concrete leadership experience stated as a role requirement (e.g. 'experience leading data engineering teams', 'technical leadership of ML projects') is a domain competency and belongs here."
+
+**v23 vs v20 full diff summary (6 changes total)**:
+1. `company_name`: added "Return null (not the string 'null')" — defensive normalisation
+2. `seniority` step 1: "Intern ..." or "... Intern" or "internship" → intern (explicit internship keyword)
+3. `seniority` step 1: "Lead" as verb carve-out + Senior+Manager tie-breaker (v23 additions)
+4. `education_required`: added "If the posting adds 'or equivalent experience', retain it"
+5. `skills_required`: added emphasis words note ("strong", "proficiency in" describe level, not required vs preferred) + responsibilities scanning paragraph + qualified leadership exclusion (v23 addition)
+6. `salary_period`: added "Infer from context (e.g. a six-figure figure with no qualifier → annual)"
+
+**Extraction-only run**: v23 run as seed=42, n=50, judge=False. Pending manual evaluation of the first 10 jobs before batch commit.
+
+### 9.8 Final batch prompt — post-v23 structural refinements (2026-03-31)
+
+After the v23 extraction run, a second review pass was conducted using extended-thinking feedback (Claude Opus). Six structural improvements were identified and applied to the prompt. These target edge cases and under-specified paths rather than directional changes — no new eval run was needed.
+
+**1. Explicit seniority enum**
+
+Added a valid-values line at the top of the seniority section: `intern, junior, mid, senior, lead, principal, manager, director, unknown` in ascending order. The enum was previously implicit, and `mid` only appeared inside the years mapping. Makes the "adjust up by one level" instruction unambiguous.
+
+**2. Scope-based seniority anchors for the no-years case**
+
+Step 2 previously said "assess responsibilities alone using the same scope signals" with no baseline to anchor from. Added explicit mappings: individual contributor executing defined tasks → junior; competent IC with some ownership of specific components → mid; owns a system or domain area, or mentors others → senior; cross-team technical authority or architectural ownership → lead. Default to mid if responsibilities describe competent IC work with no clear scope signals.
+
+**3. Default for unlabelled skills**
+
+Made explicit what was previously implicit: skills listed without any optional framing default to `skills_required`. Absence of the word "required" is not sufficient to classify a skill as preferred — there must be a positive signal of optionality.
+
+**4. Conflict resolution rule**
+
+Added: "If the same skill appears in both a required context (responsibilities section, required skills section) and a preferred/optional context, classify it as skills_required — the stronger signal takes precedence." This handles a real pattern in poorly structured postings.
+
+**5. Sharpened leadership boundary**
+
+The original carve-out ("concrete leadership experience stated as a role requirement belongs in skills_required") left grey areas like "leading cross-functional initiatives." Sharpened the test: leadership belongs in skills_required only when it specifies what is being led in technical or domain terms. Leadership framed around people dynamics or influence without a technical object belongs in skills_soft.
+
+**6. Skill name normalisation**
+
+Added a normalisation instruction: normalise to the most commonly used professional form (e.g. "Amazon Web Services" → "AWS", "Python 3" → "Python", "MS Excel" → "Excel"). Prevents noisy duplicates at scale.
+
+**This is the final batch prompt.** The v23 extraction (seed=42, n=50) is the validation sample for manual evaluation. If the manual eval confirms extraction quality, this prompt is used as-is for the full ~3,892 DS record batch and for all future data ingestion runs.
+
+---
+
+## 10. Outstanding Issues / Next Steps
 
 - [x] Judge misalignment fixed (v5)
 - [x] Preferred skills regression fixed (v7)
@@ -311,7 +512,70 @@ This is the first evaluation in the project with an objective reference — the 
 - [x] **Judge recalibrated (v9g/h/i)** — anti-anchoring on `overall` + forced recall enumeration. Overall improved +0.03–0.07 across all seeds, pct_score_1 down, n_flags halved. Forced enumeration had no effect on precision/recall (ceiling confirmed). Canonical baseline: **v9g (seed=42)**.
 - [x] `compare_versions()` removed from `report.py` — was dead code (never called, broken README example). All multi-version comparisons go through `eval_trend.py`.
 - [x] **Ground truth annotation deferred** — human annotation was evaluated and rejected as a pre-batch gate. Key reasons: (1) many fields require interpretation, making annotations a second opinion rather than objective ground truth; (2) annotator shares domain blind spots with the extractor; (3) the 9-run eval history with stable ceiling scores provides sufficient confidence. Annotation framework preserved in `tests/ground_truth_annotation/` for future use if a domain expert or downstream task demands it.
-- [ ] **Human evaluation** — score all 50 v9g extractions using `notebooks/human_eval/human_eval.ipynb`. Produces `human_scores.jsonl` for two purposes: (1) independent extraction quality signal, (2) judge calibration check via `compare()` — dimensions where human and judge consistently diverge indicate judge bias worth fixing before the next major prompt iteration.
+- [x] **Human evaluation completed** — 10 jobs scored on v20 extractions. Extraction quality confirmed excellent. Judge bias identified and structurally fixed in v21 (skills_soft, seniority). `compare()` used for calibration check.
+- [ ] **Manual evaluation of v23 extractions** — score the first 10 jobs to validate extraction quality before batch. If confirmed, the final batch prompt (§9.8 refinements applied) is used as-is.
 - [ ] `industry_accuracy` (~2.66) is the weakest remaining dimension. **Architectural fix deferred**: a company enrichment agent (web search / company page lookup) will supply ground-truth sector context at the recommendation step, rather than inferring from recruiter-written job descriptions. No further prompt iteration planned.
-- [ ] Run full pipeline on all ~3,892 DS records (lite mode, `python -m src.data_ingestion.pipeline`). **v9 is the selected extraction prompt.**
+- [ ] Run full pipeline on all ~3,892 DS records (lite mode, `python -m src.data_ingestion.pipeline`). **Prompt locked pending manual eval confirmation.**
+- [ ] This prompt is the ingestion pipeline for all future data — treat as stable unless a systematic extraction failure is identified through human audit.
 - [ ] Push lite dataset to HuggingFace Hub (`Alejandrofupi/ai-jie-jobs-lite`) after batch run.
+
+---
+
+## 11. Prompt Engineering Retrospective
+
+This section documents the full arc of the prompt development process — including the false starts, dead ends, and unexpected findings. The goal is to preserve the reasoning behind decisions that aren't obvious from the version history alone.
+
+### 11.1 The process was messier than the version numbers suggest
+
+The stage 2 trajectory table (§9.5) looks clean in hindsight. The actual process involved frequent back-and-forth: reverting decisions, re-running the same prompt to isolate variables, mistaking noise for signal, and discovering that the metric being optimised (judge score) was itself unreliable for certain dimensions.
+
+Key moments that shaped the final prompt:
+
+**The v9 wall**: After nine versions of careful prompt iteration, a human audit of the outputs revealed that the judge had masked three systematic extraction failures. The eval framework was measuring compliance with what the judge understood the rules to mean — not whether the extraction was actually correct. This was the first indication that judge scores and extraction quality are not the same thing.
+
+**The schema trap**: `nice_to_have` was defined as a subset of `skills_technical`. The intent was that required and preferred skills would be listed in `skills_technical`, with the preferred ones also flagged in `nice_to_have`. In practice the LLM treated them as mutually exclusive — a skill went into one or the other, never both. This is a known failure mode of multi-field schemas with overlapping semantics: the model resolves the ambiguity by picking one, consistently but incorrectly. The fix was a clean semantic split: `skills_required` (intent: required) and `skills_preferred` (intent: optional), no overlap by design.
+
+**The v17–v19 trough**: Adding the HARD BOUNDARY instruction (v18) caused a skills_soft regression because the judge then started penalising format instead of content. The instruction made the extractor more careful about what went into skills_required, but inadvertently made it dump verbatim sentences into skills_soft instead of condensed phrases. Three separate rule changes were needed to fully untangle this: the HARD BOUNDARY itself, the condensing instruction, and the judge score-1 threshold restructure. They only worked together.
+
+**The plateau discovery**: v20b, v21, and v22 all scored 2.80 overall despite being structurally different prompts. This was unexpected — the assumption going in was that each prompt change would move the needle. Instead, the plateau revealed that the judge had drifted after the schema change and was applying a stricter standard to `skills_required` than it had under v16. The ~0.30 drop in `skills_required` from v16 (2.78) to v21 (2.48) is almost certainly a judge calibration artefact, not an extraction quality regression. This distinction matters: continuing to optimise against a miscalibrated metric would have introduced real regressions in pursuit of a phantom improvement.
+
+**The v20b detour**: After the plateau was confirmed, a single edge case (the Kafka/Hadoop posting performing differently under v20 vs v21) led to a brief decision to revert to v20. This was reversed within the same session. At temperature=0, individual posting variance is irrelevant — the prompt should be evaluated on the distribution, not on outliers. The lesson: at n=50, Δ ≥ 0.06 on overall is meaningful; a single posting is not.
+
+**Human eval as the true calibration signal**: The single most informative data point in the entire process was 10 manually scored jobs. It took ~45 minutes, revealed a −1.1 judge gap on skills_soft and a −0.4 gap on seniority, and confirmed that extraction quality was "genuinely impressive" — a conclusion that 9 automated eval runs had obscured behind systematic under-scoring. The judge scores for skills_soft should be treated as a lower bound, not a ground truth.
+
+### 11.2 What the LLM-as-a-Judge framework is and isn't good for
+
+**Good for:**
+- Catching obvious structural errors (wrong field type, null where content exists, content where null is correct)
+- Comparing prompt versions on the same fixed sample — directional signal is reliable even when absolute scores are not
+- Detecting regressions quickly: a 5+ flag increase or 0.1+ overall drop is a real signal
+- Evaluating unambiguous fields (company_name, years_experience, salary) where there is a clear right/wrong answer
+
+**Not good for:**
+- Calibrated absolute scores on interpretive fields (skills_soft, seniority when scope-based inference is required)
+- Detecting when the judge itself has drifted relative to an earlier version
+- Replacing human judgment on whether the output is useful
+
+**The fundamental limitation**: the judge evaluates compliance with the extraction rules as it understands them. When the rules are ambiguous (as they inevitably are at the edges), the judge fills in with its own interpretation, which may differ from the intended interpretation. Human evaluation catches this; automated evaluation cannot.
+
+### 11.3 What actually moves extraction quality
+
+In order of observed impact:
+
+1. **Schema design** — the biggest lever. `nice_to_have` as a subset of `skills_technical` was a category error that no amount of prompt refinement could fix. The v16 schema redesign did more for extraction quality in a single change than all v1–v15 prompt iterations combined.
+
+2. **Field boundaries** — the HARD BOUNDARY instruction on `skills_required` eliminated an entire class of error (soft skills leaking into technical skill lists). Boundaries work best when they are stated as constraints with examples, not as implications.
+
+3. **Default assumptions made explicit** — the model fills in unstated defaults, and those defaults are often wrong. Making the intended default explicit (e.g., "skills listed without optional framing default to skills_required") removes an entire category of arbitrary variance.
+
+4. **Judge calibration** — structural judge fixes (score-1 thresholds, format vs content separation) had more impact than extractor prompt changes across v17–v21. A miscalibrated judge makes every metric unreliable.
+
+5. **Scope signals for seniority** — adding explicit scope anchors for the no-years, no-title path (IC → mid, owns domain → senior, cross-team authority → lead) closes the most common seniority failure mode.
+
+6. **Example quality** — examples should illustrate the principle, not substitute for it. Where examples dominated the rule (as in early skills_soft), the extractor would generalise to the examples rather than the intent. Principle-first, examples-to-illustrate.
+
+### 11.4 What was deliberately not done
+
+- **Few-shot examples in the extractor prompt**: Would improve scores on the specific examples but risk over-fitting the model to those patterns. Structural rules generalise better.
+- **Ground truth annotation as a pre-batch gate**: Evaluated and rejected. Many fields require interpretation; a human annotator shares the same domain blind spots as the model. The human eval of 10 extractions was more useful as a calibration check than formal annotation would have been.
+- **Continued prompt iteration after the plateau**: Once the plateau was confirmed at v20b/v21/v22, further optimisation against judge scores would have been overfitting. The remaining judge gaps (skills_required ~2.46 vs v16 baseline ~2.78) are judge drift, not extraction failures.

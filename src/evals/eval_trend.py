@@ -32,8 +32,6 @@ DIMENSIONS = [
     # Company
     "company_name_accuracy",
     "company_description_accuracy",
-    "industry_accuracy",
-    "location_accuracy",           # v1/v2 only — null in later runs
     "remote_policy_accuracy",
     "employment_type_accuracy",
     # Role
@@ -43,10 +41,9 @@ DIMENSIONS = [
     "education_accuracy",
     "responsibilities_quality",
     # Skills
-    "skills_technical_precision",
-    "skills_technical_recall",
+    "skills_required_accuracy",
+    "skills_preferred_accuracy",
     "skills_soft_accuracy",
-    "nice_to_have_accuracy",
     # Compensation
     "salary_accuracy",
     # Overall
@@ -57,11 +54,11 @@ DIMENSIONS = [
 # Group membership for the per-group subplot
 GROUPS = {
     "Company":      ["company_name_accuracy", "company_description_accuracy",
-                     "industry_accuracy", "remote_policy_accuracy", "employment_type_accuracy"],
+                     "remote_policy_accuracy", "employment_type_accuracy"],
     "Role":         ["seniority_accuracy", "job_family_accuracy", "years_experience_accuracy",
                      "education_accuracy", "responsibilities_quality"],
-    "Skills":       ["skills_technical_precision", "skills_technical_recall",
-                     "skills_soft_accuracy", "nice_to_have_accuracy"],
+    "Skills":       ["skills_required_accuracy", "skills_preferred_accuracy",
+                     "skills_soft_accuracy"],
     "Compensation": ["salary_accuracy"],
     "Overall":      ["null_appropriateness", "overall"],
 }
@@ -70,7 +67,6 @@ GROUPS = {
 _LABELS = {
     "company_name_accuracy":        "name",
     "company_description_accuracy": "description",
-    "industry_accuracy":            "industry",
     "location_accuracy":            "location",
     "remote_policy_accuracy":       "remote_policy",
     "employment_type_accuracy":     "employment_type",
@@ -79,10 +75,9 @@ _LABELS = {
     "years_experience_accuracy":    "years_exp",
     "education_accuracy":           "education",
     "responsibilities_quality":     "responsibilities",
-    "skills_technical_precision":   "tech_precision",
-    "skills_technical_recall":      "tech_recall",
+    "skills_required_accuracy":     "skills_required",
+    "skills_preferred_accuracy":    "skills_preferred",
     "skills_soft_accuracy":         "soft",
-    "nice_to_have_accuracy":        "nice_to_have",
     "salary_accuracy":              "salary",
     "null_appropriateness":         "null_handling",
     "overall":                      "overall",
@@ -91,11 +86,20 @@ _LABELS = {
 
 # ── Data ──────────────────────────────────────────────────────────────────────
 
-def build_trend(eval_root: Path) -> pd.DataFrame:
+def build_trend(
+    eval_root: Path,
+    versions: list[str] | None = None,
+) -> pd.DataFrame:
     """
     Scan eval_root for timestamped run directories, parse each report.json,
     and return a DataFrame with one row per run, columns for every dimension.
     Skips the evals/ subfolder itself.
+
+    Args:
+        eval_root: Root directory containing timestamped run folders.
+        versions:  Optional list of prompt version strings to include (e.g. ["v16", "v17"]).
+                   When provided, only runs whose prompt_version is in this list are returned.
+                   When None, all runs are included.
     """
     records = []
 
@@ -112,6 +116,9 @@ def build_trend(eval_root: Path) -> pd.DataFrame:
         parts = run_dir.name.split("_", 2)
         timestamp = f"{parts[0]}_{parts[1]}" if len(parts) >= 2 else run_dir.name
         prompt_version = parts[2] if len(parts) >= 3 else "unknown"
+
+        if versions is not None and prompt_version not in versions:
+            continue
 
         flat_scores: dict = {}
         for group_scores in report.get("groups", {}).values():
@@ -133,14 +140,24 @@ def build_trend(eval_root: Path) -> pd.DataFrame:
     return pd.DataFrame(records)
 
 
-def save_trend(eval_root: Path) -> pd.DataFrame:
-    """Build trend DataFrame, write trend.csv to eval_results/evals/, print summary table."""
-    df = build_trend(eval_root)
+def save_trend(
+    eval_root: Path,
+    versions: list[str] | None = None,
+    suffix: str = "",
+) -> pd.DataFrame:
+    """
+    Build trend DataFrame, write trend{suffix}.csv to eval_results/evals/, print summary table.
+
+    Args:
+        versions: Optional version filter passed to build_trend().
+        suffix:   Optional filename suffix, e.g. "-stage2" → trend-stage2.csv.
+    """
+    df = build_trend(eval_root, versions=versions)
     out_dir = eval_root / EVALS_SUBDIR
     out_dir.mkdir(exist_ok=True)
-    out = out_dir / "trend.csv"
+    out = out_dir / f"trend{suffix}.csv"
     df.to_csv(out, index=False, float_format="%.3f")
-    print(f"trend.csv updated → {out}  ({len(df)} runs)")
+    print(f"trend{suffix}.csv updated → {out}  ({len(df)} runs)")
     _print_table(df)
     return df
 
@@ -151,6 +168,7 @@ def plot_trends(
     df: pd.DataFrame,
     notebook_mode: bool = False,
     output_dir: Path | None = None,
+    suffix: str = "",
 ) -> dict[str, plt.Figure]:
     """
     Generate trajectory plots from a trend DataFrame.
@@ -263,7 +281,7 @@ def plot_trends(
         output_dir.mkdir(parents=True, exist_ok=True)
 
         for name, figure in figs.items():
-            out = output_dir / f"trend_{name}.png"
+            out = output_dir / f"trend_{name}{suffix}.png"
             figure.savefig(out, dpi=150, bbox_inches="tight")
             print(f"  saved → {out}")
             plt.close(figure)
@@ -297,10 +315,22 @@ def _print_table(df: pd.DataFrame) -> None:
 # ── CLI ───────────────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
+    import argparse
     from dotenv import load_dotenv
     load_dotenv()
 
     from src.config import EVALS_RESULTS_DIR
 
-    df = save_trend(EVALS_RESULTS_DIR)
-    plot_trends(df, notebook_mode=False, output_dir=EVALS_RESULTS_DIR / EVALS_SUBDIR)
+    parser = argparse.ArgumentParser(description="Build eval trend CSV and plots.")
+    parser.add_argument(
+        "--suffix", default="",
+        help="Output filename suffix, e.g. '-stage2' → trend-stage2.csv / trend_*-stage2.png",
+    )
+    parser.add_argument(
+        "--versions", nargs="+", default=None,
+        help="Prompt versions to include, e.g. --versions v16 v17. Default: all versions.",
+    )
+    args = parser.parse_args()
+
+    df = save_trend(EVALS_RESULTS_DIR, versions=args.versions, suffix=args.suffix)
+    plot_trends(df, notebook_mode=False, output_dir=EVALS_RESULTS_DIR / EVALS_SUBDIR, suffix=args.suffix)

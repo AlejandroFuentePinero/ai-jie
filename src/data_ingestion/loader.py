@@ -27,6 +27,7 @@ _RENAME = {
     "Job Title": "title",
     "Job Description": "description",
     "Location": "location",
+    "Sector": "sector",          # Glassdoor broad sector — passthrough, not extracted
 }
 
 _MIN_DESCRIPTION_LEN = 200
@@ -57,9 +58,8 @@ def load_raw_jobs(
 
     Returns:
         Unified DataFrame with a clean integer index and columns:
-        title, description, location, Company Name, Salary Estimate, Rating,
-        Headquarters, Size, Founded, Type of ownership, Industry, Sector,
-        Revenue, Competitors, Easy Apply, source.
+        title, description, location, sector, Company Name, Salary Estimate, Rating,
+        Headquarters, Size, Founded, Type of ownership, Revenue, Competitors, Easy Apply, source.
     """
     from src.config import RAW_DA_JOBS_FILE, RAW_DS_JOBS_FILE
 
@@ -82,8 +82,8 @@ def load_raw_jobs(
         da["source"] = "da"
         df = pd.concat([ds, da], ignore_index=True)
 
-    # Replace Glassdoor's -1 sentinel with NaN across all columns
-    df = df.replace(-1, np.nan)
+    # Replace Glassdoor's -1 sentinel with NaN across all columns (numeric and string forms)
+    df = df.replace(-1, np.nan).replace("-1", np.nan)
 
     # Rename pipeline-facing columns
     df = df.rename(columns=_RENAME)

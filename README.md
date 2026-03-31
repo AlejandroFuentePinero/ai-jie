@@ -156,32 +156,32 @@ figs["overview"]
 
 Each job posting is parsed into the following structure:
 
-**Company**: `company_name`, `company_description`, `industry`, `remote_policy`, `employment_type`
+**Company**: `company_name`, `company_description`, `remote_policy`, `employment_type`
 
 **Role**: `title`, `seniority`, `job_family`, `location`, `years_experience_min/max`, `key_responsibilities`, `education_required`
 
-**Skills**: `skills_technical`, `skills_soft`, `nice_to_have`
+**Skills**: `skills_required`, `skills_preferred`, `skills_soft`
 
 **Compensation**: `salary_min`, `salary_max`, `salary_currency`, `salary_period`
 
 Key rules enforced by the extraction prompt:
-- `seniority` follows a strict priority ladder: explicit title keyword → years of experience → responsibilities tone → `"unknown"`
-- `job_family` is title-first: a clear title keyword always overrides responsibilities-based inference. `"Data Analyst"` / `"Analytics Engineer"` → `data_analytics`
-- `industry` reflects the company's business sector, not the technology used (e.g. a bank hiring a data scientist → `"Financial Services"`, not `"Information Technology"`)
-- `skills_technical` includes all named tools, platform categories (cloud computing, BI tools), and methodology terms (machine learning, NLP, A/B testing)
-- `nice_to_have` only from text using explicit keywords: "preferred", "nice to have", "a plus", "bonus", "ideally", "desirable"
+- `seniority` follows a strict priority ladder: explicit title keyword → years of experience → scope of responsibilities → `"unknown"`. Title rank words (Senior, Lead, Manager, Director, VP) always take priority with no override.
+- `job_family` is title-first: a clear title keyword always overrides responsibilities-based inference. Exception: "Data Scientist" is always treated as ambiguous — primary responsibilities decide.
+- `skills_required` is exhaustive: includes precise tool tokens (Python, Spark, SQL), domain expertise areas (investment finance, security analytics), and tools named implicitly in responsibilities bullets. Hard boundary: soft/interpersonal skills never go here.
+- `skills_preferred` captures skills presented as optional or desirable using semantic judgment. Emphasis words like "strong" or "proficiency in" describe level, not optionality.
+- `skills_soft` covers interpersonal/organisational skills the employer genuinely emphasises, extracted as concise condensed phrases (2–7 words).
 
 ---
 
 ## Evaluation
 
-The LLM-as-a-Judge scores each extraction on 17 dimensions (1–3 scale) across five groups:
+The LLM-as-a-Judge scores each extraction on 15 dimensions (1–3 scale) across five groups:
 
 | Group | Dimensions |
 |-------|------------|
-| Company | name, description, industry, remote_policy, employment_type |
+| Company | company_name, company_description, remote_policy, employment_type |
 | Role | seniority, job_family, years_experience, education, responsibilities |
-| Skills | technical_precision, technical_recall, soft, nice_to_have |
+| Skills | skills_required, skills_preferred, skills_soft |
 | Compensation | salary |
 | Overall | null_appropriateness, overall |
 
@@ -200,30 +200,26 @@ After any new run, regenerate the trajectory plots:
 python -m src.evals.eval_trend
 ```
 
-### Selected prompt: v9
+### Current prompt: final batch prompt (based on v23, pending manual eval confirmation)
 
-v9 is the prompt version selected for the full batch run. The table below shows the cross-seed validation (same prompt, three independent samples):
+**Stage 1 canonical baseline**: v9g (seed=42, overall=2.98) — validated on three independent seeds.
 
-| Run | seed | n | Overall | skills_soft | skills_technical | Notes |
-|-----|------|---|---------|-------------|-----------------|-------|
-| v9 | 42 | 50 | 2.92 | 2.84 | 2.98 / 2.98 | |
-| v9b | 123 | 50 | 2.88 | 2.90 | 2.92 / 2.92 | |
-| v9c | 999 | 50 | 2.88 | 2.94 | 2.96 / 2.96 | |
-| v9d | 42 | 44 | 2.91 | 2.84 | 2.98 / 2.98 | 6 failures (TPM) |
-| v9e | 123 | 47 | 2.89 | 2.89 | 2.96 / 2.96 | |
-| v9f | 999 | 47 | 2.85 | 2.96 | 3.00 / 3.00 | |
-| **v9g** *(fixed judge)* | **42** | **50** | **2.98** | 2.82 | 2.98 / 2.98 | **Canonical baseline** |
-| v9h *(fixed judge)* | 123 | 50 | 2.94 | 2.90 | 2.98 / 2.98 | |
-| v9i *(fixed judge)* | 999 | 50 | 2.88 | 2.94 | 2.98 / 2.98 | |
+**Stage 2** (v16+) introduced a breaking schema change — `skills_technical`/`nice_to_have`/`industry` replaced by `skills_required`/`skills_preferred`/`skills_soft` — making v1–v15 scores non-comparable. v21 is the best judge-scored result in stage 2. The final batch prompt builds on v23 with additional structural refinements — see [`docs/technical_report.md §9.8`](docs/technical_report.md) for full details.
 
-The **fixed judge** (v9g+) applies two corrections to `judge.py` with no change to extraction: an anti-anchoring instruction on the `overall` dimension and a forced-enumeration instruction on `skills_technical_recall`. See the technical report §8 for the full bias analysis.
+Stage 2 trajectory (seed=42, n=50):
 
-**Why v9 over earlier versions:**
+| Version | overall | skills_required | skills_preferred | skills_soft | responsibilities | n_flags | Key change |
+|---------|---------|----------------|-----------------|-------------|-----------------|---------|------------|
+| v16 | 2.88 | 2.78 | 2.80 | 2.52 | 2.98 | 15 | Schema redesign baseline |
+| v17 | 2.76 | 2.44 | 2.76 | 2.62 | 2.94 | 36 | company_name fix; judge stricter |
+| v18 | 2.68 | 2.44 | 2.80 | 2.42 | 2.88 | 42 | HARD BOUNDARY on soft skills |
+| v19 | 2.68 | 2.34 | 2.72 | 2.30 | 2.88 | 44 | skills_soft condensing instruction |
+| **v21** | **2.80** | **2.48** | **2.82** | **2.48** | **3.00** | **25** | Full prompt polish + judge recalibration |
+| v22 | 2.80 | 2.40 | 2.74 | 2.30 | 3.00 | 21 | Temperature=0.3 — skills regressed, reverted |
+| v20b | 2.80 | 2.46 | 2.80 | 2.52 | 3.00 | 21 | v20 extractor + v21 judge — plateau confirmed |
+| v23 | — | — | — | — | — | — | Seniority verb/title, Senior+Manager, leadership exclusion + structural refinements (extraction-only, manual eval pending) |
 
-- `skills_soft_accuracy` jumped from 2.36 (v8b) → 2.84–2.96 across seeds. The fix was flipping `skills_soft` from a restrictive default ("null unless explicit qualifier") to an inclusive one ("err on the side of including"). This resolved a judge/extractor misalignment where the judge penalised inclusions the extractor was explicitly instructed to make.
-- `job_family_accuracy` improved from 2.72 (v8b) → 2.82–2.86 by enforcing title-first priority — a clear title keyword always overrides responsibilities-based inference.
-- All other dimensions held stable or improved. No regressions.
-- Validated on three independent seeds — the improvements are not overfit to the development sample.
+See [`docs/technical_report.md`](docs/technical_report.md) for the full version history and design decisions.
 
 ### Trajectory plots
 
@@ -254,14 +250,13 @@ session.show_extraction(ROW_ID)    # extracted fields
 
 session.score(
     ROW_ID,
-    company_name_accuracy=3, company_description_accuracy=2, industry_accuracy=2,
+    company_name_accuracy=3, company_description_accuracy=3,
     remote_policy_accuracy=3, employment_type_accuracy=3,
     seniority_accuracy=3, job_family_accuracy=3, years_experience_accuracy=3,
     education_accuracy=3, responsibilities_quality=3,
-    skills_technical_precision=3, skills_technical_recall=2,
-    skills_soft_accuracy=3, nice_to_have_accuracy=3,
+    skills_required_accuracy=2, skills_preferred_accuracy=3, skills_soft_accuracy=3,
     salary_accuracy=3, null_appropriateness=3, overall=2,
-    flags=["skills_technical_incomplete"],
+    flags=["skills hidden in responsibilities not extracted"],
 )
 
 session.compare()   # mean delta and top disagreements: human − judge per dimension
