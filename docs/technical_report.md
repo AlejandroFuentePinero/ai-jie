@@ -380,6 +380,10 @@ Human assessment: **extraction quality was genuinely excellent** across all 10 r
 | v18 | 2.68 | 2.44 | 2.80 | 2.42 | 2.88 | 42 | HARD BOUNDARY for soft skills in skills_required |
 | v19 | 2.68 | 2.34 | 2.72 | 2.30 | 2.88 | 44 | skills_soft condensing instruction added |
 | v21 | **2.80** | 2.48 | **2.82** | 2.48 | **3.00** | **25** | Full prompt polish + judge recalibration |
+| v22 | 2.80 | 2.40 | 2.74 | 2.30 | 3.00 | 21 | temperature=0.3 — skills regressed, reverted |
+| v20b | 2.80 | 2.46 | 2.80 | 2.52 | 3.00 | 21 | v20 extractor + v21 judge — plateau confirmed |
+| v23 | — | — | — | — | — | — | Three targeted fixes: seniority verb/title, Senior+Manager, leadership exclusion + 6 structural refinements (extraction-only) |
+| **v24** | — | — | — | — | — | — | Schema field completion (remote_policy, employment_type, salary_min/max rules); analyst catch-all for job_family; CRITICAL dual-field skills/responsibilities rule. Extraction-only, manual eval pending. |
 
 v17–v19 downward trend was driven by two compounding factors: (1) the judge became stricter after the schema change exposed new failure modes it could evaluate, and (2) the HARD BOUNDARY instruction caused format regressions in skills_soft (verbatim sentences instead of condensed phrases). v21 recovers through judge recalibration and prompt refinement.
 
@@ -496,6 +500,24 @@ Added a normalisation instruction: normalise to the most commonly used professio
 
 **This is the final batch prompt.** The v23 extraction (seed=42, n=50) is the validation sample for manual evaluation. If the manual eval confirms extraction quality, this prompt is used as-is for the full ~3,892 DS record batch and for all future data ingestion runs.
 
+### 9.9 v24 — Schema field completion and prompt reinforcement (2026-04-01)
+
+A review of every field in `models.py` against the system prompt revealed three fields with no extraction rules — only `Field(description=...)` hints, which are insufficient procedural guidance. Four additional prompt fixes were applied.
+
+**Schema gaps filled:**
+
+- **`remote_policy`**: No system prompt rule existed. Added: explicit-only extraction, normalise to Remote / Hybrid / On-site, null if not stated. `Field()` description was already present but relied solely on the schema hint.
+- **`employment_type`**: No system prompt rule existed. Added: explicit-only extraction, normalise to Full-time / Part-time / Contract / Casual / Temporary (may appear in title or body), null if not stated.
+- **`salary_min` / `salary_max`**: The compensation section had only a general preamble ("only if explicitly stated"). Added field-level rules covering range semantics: stated range → min/max split; open-ended ("$80k+") → min = stated number, max = null. Also added `Field()` descriptions to both (were bare `= None`). Judge prompt updated to match.
+
+**Prompt reinforcements:**
+
+- **`job_family` analyst catch-all**: "Data Analyst" was the only explicit mapping. All other analyst-type titles (Business Analyst, Financial Analyst, Operations Analyst, etc.) fell through to `other`. Added: "Any role with 'Analyst' in the title → data_analytics, unless the title also contains a more specific family keyword that takes precedence (e.g. 'Data Science Analyst' → data_science, 'ML Analyst' → ml_engineering)."
+
+- **`skills_required` dual-field extraction (CRITICAL)**: The original "Important:" note at the end of the skills_required rule was being deprioritised. Upgraded to a CRITICAL-labelled instruction and made explicit that the same sentence may simultaneously populate `key_responsibilities` AND `skills_required` — this is correct behaviour, not double-counting. Added: "For example (one of many possible cases)..." to generalise the example and prevent the model from treating named tokens as the exhaustive case.
+
+**Extraction run**: seed=42, n=50, judge=False — saved as `v23-final-updated`, corresponds to v24. Manual eval pending.
+
 ---
 
 ## 10. Outstanding Issues / Next Steps
@@ -513,7 +535,8 @@ Added a normalisation instruction: normalise to the most commonly used professio
 - [x] `compare_versions()` removed from `report.py` — was dead code (never called, broken README example). All multi-version comparisons go through `eval_trend.py`.
 - [x] **Ground truth annotation deferred** — human annotation was evaluated and rejected as a pre-batch gate. Key reasons: (1) many fields require interpretation, making annotations a second opinion rather than objective ground truth; (2) annotator shares domain blind spots with the extractor; (3) the 9-run eval history with stable ceiling scores provides sufficient confidence. Annotation framework preserved in `tests/ground_truth_annotation/` for future use if a domain expert or downstream task demands it.
 - [x] **Human evaluation completed** — 10 jobs scored on v20 extractions. Extraction quality confirmed excellent. Judge bias identified and structurally fixed in v21 (skills_soft, seniority). `compare()` used for calibration check.
-- [ ] **Manual evaluation of v23 extractions** — score the first 10 jobs to validate extraction quality before batch. If confirmed, the final batch prompt (§9.8 refinements applied) is used as-is.
+- [x] **Schema field completion (v24, 2026-04-01)** — added missing system prompt rules for `remote_policy`, `employment_type`, `salary_min`/`salary_max`; analyst catch-all for `job_family`; CRITICAL dual-field skills/responsibilities rule. Judge prompt updated to match. See §9.9.
+- [ ] **Manual evaluation of v24 extractions** — score the first 10 jobs to validate extraction quality before batch. If confirmed, v24 is used as-is for the full batch and all future ingestion.
 - [ ] `industry_accuracy` (~2.66) is the weakest remaining dimension. **Architectural fix deferred**: a company enrichment agent (web search / company page lookup) will supply ground-truth sector context at the recommendation step, rather than inferring from recruiter-written job descriptions. No further prompt iteration planned.
 - [ ] Run full pipeline on all ~3,892 DS records (lite mode, `python -m src.data_ingestion.pipeline`). **Prompt locked pending manual eval confirmation.**
 - [ ] This prompt is the ingestion pipeline for all future data — treat as stable unless a systematic extraction failure is identified through human audit.

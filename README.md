@@ -200,11 +200,11 @@ After any new run, regenerate the trajectory plots:
 python -m src.evals.eval_trend
 ```
 
-### Current prompt: final batch prompt (based on v23, pending manual eval confirmation)
+### Current prompt: v24 (pending manual eval confirmation)
 
 **Stage 1 canonical baseline**: v9g (seed=42, overall=2.98) — validated on three independent seeds.
 
-**Stage 2** (v16+) introduced a breaking schema change — `skills_technical`/`nice_to_have`/`industry` replaced by `skills_required`/`skills_preferred`/`skills_soft` — making v1–v15 scores non-comparable. v21 is the best judge-scored result in stage 2. The final batch prompt builds on v23 with additional structural refinements — see [`docs/technical_report.md §9.8`](docs/technical_report.md) for full details.
+**Stage 2** (v16+) introduced a breaking schema change — `skills_technical`/`nice_to_have`/`industry` replaced by `skills_required`/`skills_preferred`/`skills_soft` — making v1–v15 scores non-comparable. v21 is the best judge-scored result in stage 2. v24 is the current production prompt candidate — see [`docs/technical_report.md §9.9`](docs/technical_report.md) for full details.
 
 Stage 2 trajectory (seed=42, n=50):
 
@@ -218,6 +218,7 @@ Stage 2 trajectory (seed=42, n=50):
 | v22 | 2.80 | 2.40 | 2.74 | 2.30 | 3.00 | 21 | Temperature=0.3 — skills regressed, reverted |
 | v20b | 2.80 | 2.46 | 2.80 | 2.52 | 3.00 | 21 | v20 extractor + v21 judge — plateau confirmed |
 | v23 | — | — | — | — | — | — | Seniority verb/title, Senior+Manager, leadership exclusion + structural refinements (extraction-only, manual eval pending) |
+| **v24** | — | — | — | — | — | — | Schema completion (remote_policy, employment_type, salary_min/max rules); analyst catch-all for job_family; CRITICAL dual-field skills/responsibilities rule. Extraction-only run complete (saved as v23-final-updated). Manual eval pending. |
 
 See [`docs/technical_report.md`](docs/technical_report.md) for the full version history and design decisions.
 
