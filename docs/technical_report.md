@@ -33,7 +33,7 @@ raw CSVs → loader.py (unify, clean) → pipeline.py (async extraction) → job
 | Module | Responsibility |
 |--------|----------------|
 | `src/data_ingestion/models.py` | Pydantic schemas: `Job`, `EvaluationScore`, enums |
-| `src/data_ingestion/parser.py` | LLM extraction — `gpt-4o-mini`, `instructor`, async |
+| `src/data_ingestion/parser.py` | LLM extraction — `gpt-5.4-mini`, `instructor`, async |
 | `src/data_ingestion/loader.py` | Unified CSV loader — concat, -1→NaN, common columns, clean index |
 | `src/data_ingestion/pipeline.py` | Batch runner — lite/full modes, semaphore concurrency, checkpoint/resume |
 | `src/data_ingestion/hub.py` | HuggingFace Hub push/pull — separate lite/full repos, public |
@@ -518,6 +518,23 @@ A review of every field in `models.py` against the system prompt revealed three 
 
 **Extraction run**: seed=42, n=50, judge=False — saved as `v23-final-updated`, corresponds to v24. Manual eval pending.
 
+### 9.10 Model upgrade — gpt-5.4-mini (2026-04-01)
+
+After confirming v24 prompt stability, the extraction model was upgraded from `gpt-4o-mini` to `gpt-5.4-mini`.
+
+**Motivation**: gpt-5.4-mini supports structured outputs via the OpenAI API (compatible with `instructor`), making it a drop-in replacement. Initial test run (seed=42, n=50) completed in ~1.5 minutes vs ~4.5 minutes for gpt-4o-mini — **~3× faster** with no API errors.
+
+**Issue discovered**: gpt-5.4-mini's higher instruction compliance caused unintended noise in `skills_required`. The CRITICAL dual-field rule ("the same sentence may contribute to two fields") was being interpreted too broadly — the model was pulling full responsibility phrases into `skills_required` rather than extracting only the named skill tokens embedded within them.
+
+**Prompt adjustments made for gpt-5.4-mini:**
+
+1. **CRITICAL block rewritten** — made explicit that only discrete skill tokens transfer from responsibilities ("not the responsibility itself"), and that "generic verbs, actions, and descriptions do not" transfer.
+2. **`skills_required` opener tightened** — "technical and domain knowledge" → "technical and critical domain skills"; "A skill named" → "A core skill named"; "broader knowledge domain areas" → "key knowledge domain areas". These qualifiers reduce noise on a more compliant model without changing the intended extraction scope.
+3. **`employment_type`** — added "Do not infer." as an explicit reinforcement (was implicit from "only extract if explicitly stated").
+4. **`skills_preferred`** — "domain expertise areas" → "key domain skills" for consistency with the tightened skills_required language.
+
+**Current state**: `gpt-5.4-mini` is the production extraction model. Prompt version `v24-gpt5.4-mini` (seed=42, n=50, extraction-only) pending manual evaluation.
+
 ---
 
 ## 10. Outstanding Issues / Next Steps
@@ -536,7 +553,7 @@ A review of every field in `models.py` against the system prompt revealed three 
 - [x] **Ground truth annotation deferred** — human annotation was evaluated and rejected as a pre-batch gate. Key reasons: (1) many fields require interpretation, making annotations a second opinion rather than objective ground truth; (2) annotator shares domain blind spots with the extractor; (3) the 9-run eval history with stable ceiling scores provides sufficient confidence. Annotation framework preserved in `tests/ground_truth_annotation/` for future use if a domain expert or downstream task demands it.
 - [x] **Human evaluation completed** — 10 jobs scored on v20 extractions. Extraction quality confirmed excellent. Judge bias identified and structurally fixed in v21 (skills_soft, seniority). `compare()` used for calibration check.
 - [x] **Schema field completion (v24, 2026-04-01)** — added missing system prompt rules for `remote_policy`, `employment_type`, `salary_min`/`salary_max`; analyst catch-all for `job_family`; CRITICAL dual-field skills/responsibilities rule. Judge prompt updated to match. See §9.9.
-- [ ] **Manual evaluation of v24 extractions** — score the first 10 jobs to validate extraction quality before batch. If confirmed, v24 is used as-is for the full batch and all future ingestion.
+- [ ] **Manual evaluation of v24-gpt5.4-mini extractions** — score the first 10 jobs to validate extraction quality and confirm the model upgrade produces clean output. If confirmed, v24-gpt5.4-mini is used for the full batch and all future ingestion.
 - [ ] `industry_accuracy` (~2.66) is the weakest remaining dimension. **Architectural fix deferred**: a company enrichment agent (web search / company page lookup) will supply ground-truth sector context at the recommendation step, rather than inferring from recruiter-written job descriptions. No further prompt iteration planned.
 - [ ] Run full pipeline on all ~3,892 DS records (lite mode, `python -m src.data_ingestion.pipeline`). **Prompt locked pending manual eval confirmation.**
 - [ ] This prompt is the ingestion pipeline for all future data — treat as stable unless a systematic extraction failure is identified through human audit.

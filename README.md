@@ -8,7 +8,7 @@ An end-to-end pipeline for extracting, evaluating, and versioning structured dat
 
 AI-JIE takes raw job posting text and produces structured records — company, role, skills, and compensation — ready for downstream analysis. It includes a full evaluation framework using LLM-as-a-Judge to measure and iteratively improve extraction quality.
 
-**Stack**: Python · OpenAI (`gpt-4o-mini` for extraction, `gpt-4o` for evaluation) · `instructor` · `asyncio` · HuggingFace Hub · Pydantic
+**Stack**: Python · OpenAI (`gpt-5.4-mini` for extraction, `gpt-4o` for evaluation) · `instructor` · `asyncio` · HuggingFace Hub · Pydantic
 
 ---
 
@@ -218,7 +218,8 @@ Stage 2 trajectory (seed=42, n=50):
 | v22 | 2.80 | 2.40 | 2.74 | 2.30 | 3.00 | 21 | Temperature=0.3 — skills regressed, reverted |
 | v20b | 2.80 | 2.46 | 2.80 | 2.52 | 3.00 | 21 | v20 extractor + v21 judge — plateau confirmed |
 | v23 | — | — | — | — | — | — | Seniority verb/title, Senior+Manager, leadership exclusion + structural refinements (extraction-only, manual eval pending) |
-| **v24** | — | — | — | — | — | — | Schema completion (remote_policy, employment_type, salary_min/max rules); analyst catch-all for job_family; CRITICAL dual-field skills/responsibilities rule. Extraction-only run complete (saved as v23-final-updated). Manual eval pending. |
+| **v24** | — | — | — | — | — | — | Schema completion (remote_policy, employment_type, salary_min/max rules); analyst catch-all for job_family; CRITICAL dual-field skills/responsibilities rule. Extraction-only run complete. Manual eval pending. |
+| v24-gpt5.4-mini | — | — | — | — | — | — | Model upgrade to gpt-5.4-mini (3× faster). Prompt tightened: CRITICAL rule scoped to discrete skill tokens only (gpt-5.4-mini's higher compliance caused noise without this). Also: "Do not infer" on employment_type; "core skill" / "critical domain skills" qualifiers. |
 
 See [`docs/technical_report.md`](docs/technical_report.md) for the full version history and design decisions.
 
