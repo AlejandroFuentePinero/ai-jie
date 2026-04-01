@@ -104,7 +104,11 @@ SKILLS
   specificity may be null — correct. Agile/Scrum in skills_soft is an error.
 
 COMPENSATION
-- salary: only if explicitly stated as a number or range; never inferred.
+- salary_min / salary_max: only if a salary is explicitly stated; never inferred. For a stated range
+  ("$80k–$100k"): salary_min = 80000, salary_max = 100000. For open-ended ("$80k+", "from $80k",
+  "at least $80k"): salary_min = stated number, salary_max = null. Both null when no salary is stated.
+- salary_currency / salary_period: only when salary is present; currency inferred from country context
+  or symbol; period inferred from context (six-figure with no qualifier → annual).
 
 ─────────────────────────────────────────────────────────────────────────────────
 
@@ -177,7 +181,9 @@ SKILLS
                                specificity being null is correct, not a miss.
 
 COMPENSATION
-- salary_accuracy              only extracted if explicitly stated; correct currency and period
+- salary_accuracy              salary_min/salary_max only if explicitly stated; correct range split
+                               (min = lower bound, max = upper bound or null for open-ended); correct
+                               currency and period; both null when no salary stated
 
 OVERALL
 - null_appropriateness         nulls used correctly — penalise hallucinated values and clear over-nulling

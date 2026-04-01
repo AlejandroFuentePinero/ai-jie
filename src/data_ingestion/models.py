@@ -99,8 +99,12 @@ class Job(BaseModel):
     )
 
     # --- Compensation ---
-    salary_min: Optional[float] = None
-    salary_max: Optional[float] = None
+    salary_min: Optional[float] = Field(
+        None, description="Lower bound of stated salary. For open-ended ranges ('$80k+') set to the stated number. Null if no salary is stated."
+    )
+    salary_max: Optional[float] = Field(
+        None, description="Upper bound of a stated salary range. Null for open-ended ranges ('$80k+'). Null if no salary is stated."
+    )
     salary_currency: Optional[str] = Field(
         None, description="ISO currency code e.g. AUD, USD."
     )
