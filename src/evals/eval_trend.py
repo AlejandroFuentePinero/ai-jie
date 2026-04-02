@@ -32,8 +32,6 @@ DIMENSIONS = [
     # Company
     "company_name_accuracy",
     "company_description_accuracy",
-    "remote_policy_accuracy",
-    "employment_type_accuracy",
     # Role
     "seniority_accuracy",
     "job_family_accuracy",
@@ -44,8 +42,6 @@ DIMENSIONS = [
     "skills_required_accuracy",
     "skills_preferred_accuracy",
     "skills_soft_accuracy",
-    # Compensation
-    "salary_accuracy",
     # Overall
     "null_appropriateness",
     "overall",
@@ -53,23 +49,18 @@ DIMENSIONS = [
 
 # Group membership for the per-group subplot
 GROUPS = {
-    "Company":      ["company_name_accuracy", "company_description_accuracy",
-                     "remote_policy_accuracy", "employment_type_accuracy"],
-    "Role":         ["seniority_accuracy", "job_family_accuracy", "years_experience_accuracy",
-                     "education_accuracy", "responsibilities_quality"],
-    "Skills":       ["skills_required_accuracy", "skills_preferred_accuracy",
-                     "skills_soft_accuracy"],
-    "Compensation": ["salary_accuracy"],
-    "Overall":      ["null_appropriateness", "overall"],
+    "Company":  ["company_name_accuracy", "company_description_accuracy"],
+    "Role":     ["seniority_accuracy", "job_family_accuracy", "years_experience_accuracy",
+                 "education_accuracy", "responsibilities_quality"],
+    "Skills":   ["skills_required_accuracy", "skills_preferred_accuracy",
+                 "skills_soft_accuracy"],
+    "Overall":  ["null_appropriateness", "overall"],
 }
 
 # Short axis labels
 _LABELS = {
     "company_name_accuracy":        "name",
     "company_description_accuracy": "description",
-    "location_accuracy":            "location",
-    "remote_policy_accuracy":       "remote_policy",
-    "employment_type_accuracy":     "employment_type",
     "seniority_accuracy":           "seniority",
     "job_family_accuracy":          "job_family",
     "years_experience_accuracy":    "years_exp",
@@ -78,7 +69,6 @@ _LABELS = {
     "skills_required_accuracy":     "skills_required",
     "skills_preferred_accuracy":    "skills_preferred",
     "skills_soft_accuracy":         "soft",
-    "salary_accuracy":              "salary",
     "null_appropriateness":         "null_handling",
     "overall":                      "overall",
 }

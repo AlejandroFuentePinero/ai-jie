@@ -16,8 +16,6 @@ SCORE_GROUPS: dict[str, list[str]] = {
     "Company": [
         "company_name_accuracy",
         "company_description_accuracy",
-        "remote_policy_accuracy",
-        "employment_type_accuracy",
     ],
     "Role": [
         "seniority_accuracy",
@@ -30,9 +28,6 @@ SCORE_GROUPS: dict[str, list[str]] = {
         "skills_required_accuracy",
         "skills_preferred_accuracy",
         "skills_soft_accuracy",
-    ],
-    "Compensation": [
-        "salary_accuracy",
     ],
     "Overall": [
         "null_appropriateness",

@@ -42,98 +42,104 @@ class Job(BaseModel):
     title: str
     description: str
     location: str
-    sector: Optional[str] = None  # Glassdoor broad sector — passed through, not extracted
+    sector: Optional[str] = None
 
     # --- Company ---
     company_name: Optional[str] = Field(
         None,
-        description="The name of the hiring company. May appear anywhere in the posting — header, 'About us' section, body, or footer. Extract the canonical company name, not a department or team (e.g. 'IBM' not 'IBM's AI Research Group'). Null only if genuinely not mentioned anywhere.",
+        description="Canonical company name. Null if not mentioned.",
     )
     company_description: Optional[str] = Field(
         None,
-        description="Always null — populated by a downstream enrichment agent, not extracted from the posting.",
-    )
-
-    remote_policy: Optional[str] = Field(
-        None, description="Remote, hybrid, or on-site — as stated in the posting."
-    )
-    employment_type: Optional[str] = Field(
-        None, description="Full-time, part-time, contract, casual, or temporary — as stated in the posting. 'Temporary' may appear in the title or body."
+        description="Always null.",
     )
 
     # --- Role ---
     seniority: Optional[Seniority] = Field(
         None,
-        description="Explicit seniority anywhere in title or description takes absolute priority. When not explicit: start from years (0-1→junior, 2-4→mid, 5-7→senior, 8+→lead), then adjust up if the described scope clearly exceeds what years suggest (e.g. mentoring juniors, owning architecture, managing direct reports). Unknown if still unclear.",
+        description="Title keyword first, then years of experience, then scope of responsibilities. Unknown if unclear.",
     )
     job_family: Optional[JobFamily] = Field(
-        None, description="Title keyword takes priority. Use responsibilities as tiebreaker when the title is ambiguous."
+        None,
+        description="Title keyword first. Responsibilities as tiebreaker.",
     )
     years_experience_min: Optional[int] = Field(
-        None, description="Minimum years of experience explicitly stated."
+        None,
+        description="Minimum years explicitly stated. Null if not stated.",
     )
     years_experience_max: Optional[int] = Field(
-        None, description="Maximum years of experience if a range is stated. Null for open-ended ranges ('3+ years', 'at least 5 years').",
+        None,
+        description="Maximum years if a range is stated. Null for open-ended ranges.",
     )
     key_responsibilities: list[str] = Field(
         default_factory=list,
-        description="Up to 7 concrete responsibilities explicitly stated in the posting. Verb-led. No inferred or constructed items. If more than 7 are stated, select the first 7 stated.",
+        description="Up to 7 concrete responsibilities. Verb-led. Only what is directly written.",
     )
     education_required: Optional[str] = Field(
         None,
-        description="Minimum education level stated e.g. Bachelor's in Computer Science.",
+        description="Required education only, not preferred. Null if not stated.",
     )
 
-    # --- Skills ---
-    skills_required: Optional[list[str]] = Field(
+    # --- Skills scaffolding (chain-of-thought) ---
+    responsibility_skills_found: Optional[list[str]] = Field(
         None,
-        description="Technical skills, tools, technologies, methodology terms, and domain knowledge areas the posting presents as required or expected. Includes precise tokens (Python, SQL) and broader knowledge domains (e.g. 'investment finance', 'security analytics'). Scan the entire posting including responsibilities — tools named in responsibility bullets are implicitly required skills. Exhaustive. Soft/interpersonal skills never go here — they belong in skills_soft regardless of where they appear in the posting.",
+        description=(
+            "FILL FIRST. Scan ONLY responsibility/duties statements — "
+            "what the person will do in this role. List named tools, "
+            "technologies, programming languages, methodologies, or domain skills. "
+            "Do NOT scan requirements, qualifications, or preferred sections. "
+            "Skill tokens only, not sentences."
+        ),
     )
+    preferred_signals_found: Optional[list[str]] = Field(
+        None,
+        description=(
+            "FILL SECOND. Find every sentence containing optionality "
+            "language (preferred, plus, bonus, nice to have, ideally, "
+            "desirable, etc). Copy the FULL sentence, not just the "
+            "signal words — the sentence contains the skill names "
+            "needed for classification. Null if none exist."
+        ),
+    )
+
+    # --- Skills classification ---
     skills_preferred: Optional[list[str]] = Field(
         None,
-        description="Technical skills, tools, technologies, and domain expertise areas the posting presents as optional or desirable. Use semantic judgment to identify optional framing. Null if no optional framing exists.",
+        description=(
+            "FILL FIRST from skills. Extract technical skills from the "
+            "preferred zones identified above. Null if no optionality "
+            "language in the posting."
+        ),
+    )
+    skills_required: Optional[list[str]] = Field(
+        None,
+        description=(
+            "All remaining technical skills NOT already listed in "
+            "skills_preferred above. Skills named in responsibility "
+            "statements are always required."
+        ),
     )
     skills_soft: Optional[list[str]] = Field(
         None,
-        description="Interpersonal or organisational skills the employer genuinely emphasises. Concise phrases (2–7 words) — condense, do not copy verbatim sentences. Covers all soft skills regardless of whether they are framed as required or preferred. Null only if the posting contains no meaningful soft skill signal.",
-    )
-
-    # --- Compensation ---
-    salary_min: Optional[float] = Field(
-        None, description="Lower bound of stated salary. For open-ended ranges ('$80k+') set to the stated number. Null if no salary is stated."
-    )
-    salary_max: Optional[float] = Field(
-        None, description="Upper bound of a stated salary range. Null for open-ended ranges ('$80k+'). Null if no salary is stated."
-    )
-    salary_currency: Optional[str] = Field(
-        None, description="ISO currency code e.g. AUD, USD."
-    )
-    salary_period: Optional[str] = Field(
-        None, description="annual, monthly, or hourly."
+        description="Interpersonal and behavioural skills. Concise phrases, 2-7 words.",
     )
 
 
 class EvaluationScore(BaseModel):
     # Company
-    company_name_accuracy: int  # 1-3: correctly extracted or null if not stated
-    company_description_accuracy: int  # 1-3: always null (enrichment agent handles)
-    remote_policy_accuracy: int  # 1-3: remote/hybrid/on-site correctly identified
-    employment_type_accuracy: int  # 1-3: full-time/contract etc correctly identified
+    company_name_accuracy: int
+    company_description_accuracy: int
     # Role
-    seniority_accuracy: int  # 1-3: title first, then years, then responsibilities
-    job_family_accuracy: int  # 1-3: closest category based on responsibilities
-    years_experience_accuracy: (
-        int  # 1-3: only extracted if explicitly stated as a number
-    )
-    education_accuracy: int  # 1-3: only required education, not preferred
-    responsibilities_quality: int  # 1-3: concrete verb-led actions, no filler
+    seniority_accuracy: int
+    job_family_accuracy: int
+    years_experience_accuracy: int
+    education_accuracy: int
+    responsibilities_quality: int
     # Skills
-    skills_required_accuracy: int  # 1-3: required technical skills correctly and completely extracted
-    skills_preferred_accuracy: int  # 1-3: preferred/optional technical skills correctly extracted; null ok if none
-    skills_soft_accuracy: int  # 1-3: soft skills the employer emphasises, concise phrases
-    # Compensation
-    salary_accuracy: int  # 1-3: only extracted if explicitly stated
+    skills_required_accuracy: int
+    skills_preferred_accuracy: int
+    skills_soft_accuracy: int
     # Overall
-    null_appropriateness: int  # 1-3: nulls used correctly across all fields
-    overall: int  # 1-3: holistic trust score
-    flags: list[str]  # specific issues found, empty list if none
+    null_appropriateness: int
+    overall: int
+    flags: list[str]

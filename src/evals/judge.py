@@ -45,8 +45,6 @@ The extractor was given these exact rules. Evaluate compliance with them:
 
 COMPANY
 - company_description: always null — always score 3 if null, score 1 if any value is present.
-- remote_policy: remote/hybrid/on-site as stated; null if not mentioned.
-- employment_type: full-time/part-time/contract/casual/temporary as stated in the title or body; null if not mentioned.
 
 ROLE
 - seniority: determined in strict priority order:
@@ -103,13 +101,6 @@ SKILLS
   phrases. Covers soft skills regardless of required/preferred framing. Generic boilerplate with zero
   specificity may be null — correct. Agile/Scrum in skills_soft is an error.
 
-COMPENSATION
-- salary_min / salary_max: only if a salary is explicitly stated; never inferred. For a stated range
-  ("$80k–$100k"): salary_min = 80000, salary_max = 100000. For open-ended ("$80k+", "from $80k",
-  "at least $80k"): salary_min = stated number, salary_max = null. Both null when no salary is stated.
-- salary_currency / salary_period: only when salary is present; currency inferred from country context
-  or symbol; period inferred from context (six-figure with no qualifier → annual).
-
 ─────────────────────────────────────────────────────────────────────────────────
 
 SCORING GUIDE (apply to every dimension):
@@ -130,8 +121,6 @@ COMPANY
                                genuinely not mentioned anywhere in the posting — penalise null when
                                the company name is clearly present
 - company_description_accuracy always null (populated by enrichment agent, not extracted); score 3 if null, score 1 if any value present
-- remote_policy_accuracy       remote/hybrid/on-site correctly identified or null
-- employment_type_accuracy     full-time/part-time/contract/casual/temporary correctly identified (may appear in title or body) or null
 
 ROLE
 - seniority_accuracy           TO SCORE: (1) check title and description for explicit seniority
@@ -180,11 +169,6 @@ SKILLS
                                clearly emphasised soft skills returning null. Generic boilerplate with zero
                                specificity being null is correct, not a miss.
 
-COMPENSATION
-- salary_accuracy              salary_min/salary_max only if explicitly stated; correct range split
-                               (min = lower bound, max = upper bound or null for open-ended); correct
-                               currency and period; both null when no salary stated
-
 OVERALL
 - null_appropriateness         nulls used correctly — penalise hallucinated values and clear over-nulling
 - overall                      Holistic rule compliance across ALL field groups equally (Company, Role,
@@ -192,6 +176,7 @@ OVERALL
                                scored separately. A high null_appropriateness does not imply a high
                                overall score if other fields have systematic errors, and vice versa.
                                Weight every group equally; penalise any group with clear rule violations.
+                               Groups: Company, Role, Skills.
 - flags                        specific rule violations as short strings; empty list if none
 
 Return ONLY a valid JSON object with exactly these keys. No preamble, no markdown fences.
@@ -219,11 +204,13 @@ def _get_sync_judge() -> instructor.Instructor:
 def _build_user_message(job_title: str, description: str, extracted: Job) -> str:
     import json
 
-    # Strip passthrough fields — raw inputs copied verbatim, not extracted values.
-    # Including description creates circular evaluation; title/location have no ground-truth.
+    # Strip passthrough fields and scaffolding fields before sending to judge.
+    # description creates circular evaluation; title/location have no ground-truth.
+    # preferred_signals_found is chain-of-thought scaffolding — not a quality target.
+    _JUDGE_EXCLUDE = {"title", "description", "location", "preferred_signals_found", "responsibility_skills_found"}
     extracted_dict = {
         k: v for k, v in extracted.model_dump().items()
-        if k not in ("title", "description", "location")
+        if k not in _JUDGE_EXCLUDE
     }
 
     return (

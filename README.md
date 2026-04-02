@@ -200,11 +200,11 @@ After any new run, regenerate the trajectory plots:
 python -m src.evals.eval_trend
 ```
 
-### Current prompt: v24 (pending manual eval confirmation)
+### Current prompt: v31 (human eval in progress before batch)
 
 **Stage 1 canonical baseline**: v9g (seed=42, overall=2.98) — validated on three independent seeds.
 
-**Stage 2** (v16+) introduced a breaking schema change — `skills_technical`/`nice_to_have`/`industry` replaced by `skills_required`/`skills_preferred`/`skills_soft` — making v1–v15 scores non-comparable. v21 is the best judge-scored result in stage 2. v24 is the current production prompt candidate — see [`docs/technical_report.md §9.9`](docs/technical_report.md) for full details.
+**Stage 2** (v16+) introduced a breaking schema change — `skills_technical`/`nice_to_have`/`industry` replaced by `skills_required`/`skills_preferred`/`skills_soft` — making v1–v15 scores non-comparable. v21 is the best judge-scored result in stage 2. v31 is the locked batch prompt — see [`docs/technical_report.md §9.13`](docs/technical_report.md) for full details.
 
 Stage 2 trajectory (seed=42, n=50):
 
@@ -217,9 +217,15 @@ Stage 2 trajectory (seed=42, n=50):
 | **v21** | **2.80** | **2.48** | **2.82** | **2.48** | **3.00** | **25** | Full prompt polish + judge recalibration |
 | v22 | 2.80 | 2.40 | 2.74 | 2.30 | 3.00 | 21 | Temperature=0.3 — skills regressed, reverted |
 | v20b | 2.80 | 2.46 | 2.80 | 2.52 | 3.00 | 21 | v20 extractor + v21 judge — plateau confirmed |
-| v23 | — | — | — | — | — | — | Seniority verb/title, Senior+Manager, leadership exclusion + structural refinements (extraction-only, manual eval pending) |
-| **v24** | — | — | — | — | — | — | Schema completion (remote_policy, employment_type, salary_min/max rules); analyst catch-all for job_family; CRITICAL dual-field skills/responsibilities rule. Extraction-only run complete. Manual eval pending. |
-| v24-gpt5.4-mini | — | — | — | — | — | — | Model upgrade to gpt-5.4-mini (3× faster). Prompt tightened: CRITICAL rule scoped to discrete skill tokens only (gpt-5.4-mini's higher compliance caused noise without this). Also: "Do not infer" on employment_type; "core skill" / "critical domain skills" qualifiers. |
+| v23 | — | — | — | — | — | — | Seniority verb/title, Senior+Manager, leadership exclusion + structural refinements |
+| **v24** | — | — | — | — | — | — | Schema completion (remote_policy, employment_type, salary rules); analyst catch-all; CRITICAL dual-field rule |
+| v24-gpt5.4-mini | — | — | — | — | — | — | Model upgrade to gpt-5.4-mini; CRITICAL rule scoped to discrete tokens only |
+| v25 | — | — | — | — | — | — | Patch: modifier/preferred + deduplication CRITICAL rules. Superseded by v27. |
+| v26 | — | — | — | — | — | — | Patch: decision-tree without skill gate — random box of tokens. Superseded by v27. |
+| v27 | — | — | — | — | — | — | Skills section redesign: skill gate, soft routing, scope-aware classification. Superseded by v28. |
+| v28 | — | — | — | — | — | — | Schema chain-of-thought: `responsibility_skills_found` + `preferred_signals_found` scaffolding; prompt ~250→60 lines; salary/remote/employment removed |
+| v29–v30 | — | — | — | — | — | — | Iterative micro-refinements: field description tightening, scope constraints, CV test calibration |
+| **v31** | — | — | — | — | — | — | **Locked batch prompt** — preferred-first field ordering (blast radius asymmetry confirmed); schema: scaffolding → skills_preferred → skills_required → skills_soft |
 
 See [`docs/technical_report.md`](docs/technical_report.md) for the full version history and design decisions.
 

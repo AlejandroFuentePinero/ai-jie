@@ -535,6 +535,163 @@ After confirming v24 prompt stability, the extraction model was upgraded from `g
 
 **Current state**: `gpt-5.4-mini` is the production extraction model. Prompt version `v24-gpt5.4-mini` (seed=42, n=50, extraction-only) pending manual evaluation.
 
+### 9.11 v25 — skills_preferred systematic failure and prompt fixes (2026-04-02)
+
+Manual evaluation of v24-gpt5.4-mini extractions (8 jobs reviewed) revealed a single systematic failure mode affecting approximately half of the reviewed postings: **skills_preferred misclassification**.
+
+Two distinct patterns were identified:
+
+**Failure 1: Proficiency/level modifiers overriding section placement**
+
+Skills explicitly placed in a preferred or "nice to have" section were being extracted into `skills_required` when described using strong proficiency language — e.g. "proficiency in Scala is a plus", "deep knowledge of Kubernetes would be an advantage", "fluency in Spark is ideally desired". The extractor was treating the modifier (proficiency, fluency, deep knowledge) as a signal of requirement level, overriding the clear optionality signal in the surrounding language.
+
+Root cause: the existing modifier rule ("emphasis words describe level, not required vs preferred") was stated only within `skills_required` as a caveat, and was not reinforced at the point of decision in `skills_preferred`. The model was reading the level modifier before encountering the optionality signal, and classifying accordingly.
+
+**Failure 2: Same skill token duplicated across required and preferred**
+
+When a posting listed a broad skill (e.g. "ML") as required in one section and a specific variant ("ML applications") as preferred in another, the extractor was producing the same short token ("ML") in both fields. This created duplicates and violated the intended field semantics.
+
+**Fixes applied (4 targeted prompt changes):**
+
+1. `skills_required` modifier rule: extended examples list to include "deep knowledge of", "excellent understanding of"; added explicit carve-out: "This applies within unframed or required sections only; a skill placed within an explicitly preferred/optional section is always skills_preferred regardless of these modifiers alone — note that if that same skill token also appears in a required context elsewhere in the posting, the deduplication rule below takes precedence."
+
+2. `skills_required` deduplication rule (CRITICAL, new): "Never repeat the exact same literal skill token across skills_required and skills_preferred. If the exact same token would appear in both, place it in skills_required only. When required and preferred contexts describe related but distinct aspects of a broader skill area, you must enrich each token with enough qualifying words so that the two stored strings are literally different (e.g. 'classical ML' vs 'ML model deployment at scale')."
+
+3. `skills_preferred` deduplication mirror (CRITICAL, new): Explicit instruction not to repeat verbatim tokens from `skills_required`, placed within the `skills_preferred` rule where the decision is made. Includes examples showing the enrichment pattern in context: "a posting that requires Python and also states 'Python for distributed computing is a huge plus' → 'Python' in skills_required and 'Python for distributed computing' in skills_preferred."
+
+4. `skills_preferred` proficiency modifier rule (CRITICAL, new): "Words that describe the desired proficiency level of a skill (how good the candidate should be at it) are entirely separate from whether the skill is required or preferred. When any proficiency descriptor appears alongside a clear optionality signal, the skill is preferred — the proficiency word only tells you how strong a candidate should ideally be, not that the skill is a requirement." Includes direct examples matching observed failure patterns.
+
+**Design principle applied**: all changes are stated as generalisable principles with illustrative examples, not as pattern-matched rules for specific words. This avoids over-engineering the prompt toward observed edge cases and improves generalisation.
+
+**Prompt coherence review**: Before running v25, a full cross-field review of the skills section was conducted to check for contradictions introduced by the new rules. One tension found: the word "always" in the modifier carve-out could conflict with the deduplication rule when a skill appears in both a preferred section and a required context. Fixed by scoping: "always skills_preferred regardless of these modifiers alone — if that same token also appears in a required context, the deduplication rule takes precedence."
+
+**v25 extraction run**: seed=42, n=50, judge=False. Output: `eval_results/20260402_020344_v25/extractions.jsonl`. Manual evaluation in progress.
+
+### 9.12 v26–v27 — Prompt architectural redesign (2026-04-02)
+
+Human evaluation of v25 extractions revealed that the targeted patch approach had reached its limits. While v25 addressed the two identified failure modes, the accumulated CRITICAL rules, cross-field references, and patch-on-patch structure created a new problem: skills were being extracted as a "random box of tokens" — the model was capturing almost anything listed as required regardless of whether it was a genuine skill. The enrichment exception in the deduplication rule was also being over-applied, tilting preferred skill extraction toward the exception path rather than the default omit path.
+
+**Root cause**: The v24–v26 prompt had accumulated layers of targeted fixes that had become mutually reinforcing in unintended ways. Each patch addressed a specific failure while introducing new ambiguity at the edges of other rules. The classification logic was spread across three field definitions with cross-references between them, requiring the model to hold interacting constraints simultaneously while extracting.
+
+**v26 — intermediate attempt**: A decision-tree structure was introduced but without a definition of what constitutes a skill. The model applied the tree correctly but to the wrong inputs — it classified everything in the posting, not just skill tokens.
+
+**v27 — full architectural redesign**: The entire skills section was rewritten as a three-stage framework, separating concerns that had been conflated:
+
+**Stage 1 — Skill definition gate**: Before any classification, a token must pass a skill definition test. A skill is a capability a candidate would credibly list on their CV, falling into: (a) named technology/tool/platform, (b) named framework/library/language feature, (c) named methodology/standard, (d) domain expertise area. Explicit exclusions: job duties disguised as skills ("deliver insights", "build scalable systems"), vague trait-adjacent descriptors ("analytical mindset", "data-driven thinking"), and industry sectors used as company context rather than required candidate knowledge.
+
+**Stage 2 — Soft skill routing**: Any token matching interpersonal/behavioural/organisational patterns routes directly to skills_soft before any required/preferred classification. Hard boundary with explicit tie-breaker: "when in doubt whether a token is soft or technical, route it to skills_soft."
+
+**Stage 3 — Required vs preferred classification**: Rebuilt around two key architectural decisions:
+1. **Scope concept**: An optionality signal has a scope. A scope-opening signal (e.g. "Preferred:", "Nice to have:") opens a preferred context window for all skills that follow, until text clearly shifts to a new topic or requirement context. An inline signal applies only to the adjacent skill. This directly addresses the systematic failure where postings with a "Preferred skills" section were having individual skills within it misclassified as required.
+2. **Proficiency modifiers declared invisible**: Words like "strong", "proficiency in", "deep knowledge of", "fluency in" are explicitly described as orthogonal to the required/preferred decision. They do not open, close, or override any optionality context window.
+3. **Required is the default**: "Required is not something you detect — it is what remains after preferred skills have been identified."
+4. **Deduplication as post-classification step**: Moved to Step 4, after all classification is complete, making it a clean final check rather than an interleaved constraint.
+
+**Design principle**: rather than adding rules for observed failure patterns (the patch approach), the redesign defines the reasoning process the model should follow. Examples illustrate patterns, not exhaustive cases.
+
+**v27 extraction run**: seed=42, n=50, judge=False. Output: `eval_results/20260402_031323_v27/extractions.jsonl`. Manual evaluation in progress.
+
+### 9.13 v28 — Schema-enforced chain-of-thought and structural simplification (2026-04-02)
+
+Human evaluation of v27 extractions revealed that the three-stage decision tree, while logically sound, still failed intermittently on preferred classification — the same root failure mode as v24–v26. Diagnosing this led to a fundamental insight about how small LLMs process long prompts, which drove the most significant architectural change in the entire project.
+
+#### Why simpler prompts lead to better output
+
+This is counterintuitive if you think of the LLM as a rule engine — more rules should mean more precise behaviour. But a small LLM has a finite attention budget. Every token in the prompt competes for attention during generation. The v27 skills section was ~250 lines. When the model is filling `skills_preferred`, it is not attending equally to all 250 lines — it attends most strongly to what is recent and prominent, and less to what is buried deep.
+
+The proficiency-vs-optionality rule was the most important rule in the entire skills section, and it was buried 150 lines into the skills section, inside a CRITICAL block, after stages, steps, scope types, and hierarchy explanations. By the time the model reached the point of generating `skills_preferred`, that rule had been pushed out of effective attention range by everything that came after it.
+
+**The patch paradox**: every time a rule was added to fix the proficiency problem, it made the problem worse, because the new rule pushed the original proficiency rule even further from the generation point. The asymmetric hierarchy explanation, the processing order, the grammatical form paragraph — each was correct in isolation but collectively they diluted attention on the one thing that mattered. Rules do not stack in an LLM the way they stack in code. They compete.
+
+The simplified prompt works better because the optionality-vs-proficiency distinction is now the first thing in the skills section, not the last. The model reads it, and there are only ~60 more lines before it starts generating — not 150. Less dilution, stronger signal at generation time.
+
+#### Why preferred signals are stored in the schema
+
+The core failure was a sequencing problem. With instructor, the model fills fields in schema declaration order. In the old schema, the model would hit `skills_required` first and start generating. At that point it had not systematically thought about which skills were preferred — it was making classification decisions on the fly, skill by skill, while also trying to retain 250 lines of rules. By the time it reached `skills_preferred`, it had already committed most skills to required.
+
+Two scaffolding fields were added to enforce this. The model's generation order is now:
+
+1. Fill `responsibility_skills_found` → scan every responsibility bullet and write down all embedded skill tokens
+2. Fill `preferred_signals_found` → write down every optionality phrase in the posting
+3. Fill `skills_preferred` → FILL FIRST from skills, using preferred zones as anchors (bounded blast radius — see below)
+4. Fill `skills_required` → everything not already in preferred, plus all responsibility-embedded tokens
+5. Fill `skills_soft` → interpersonal and behavioural skills
+
+The model's own output becomes its working memory. It cannot forget the preferred zones because they are in the tokens it just generated, which are in its context window during subsequent field generation. This is the difference between "hold these abstract rules in mind while generating" and "look at what you just wrote down."
+
+#### Why not extract all skills first, then classify?
+
+That would work — same principle of separating extraction from classification. But it would require either two API calls (doubling cost and latency) or a complex intermediate schema. The two scaffolding fields are the minimal version of that idea: instead of extracting all skills into a flat list and reclassifying, they extract just the reasoning inputs — the responsibility-embedded tokens and the optionality phrases — and then the model uses those inputs during extraction. One pass, one API call, but with the reasoning inputs written down before the reasoning outputs are generated.
+
+The analogy: the old approach asked the model to simultaneously read a map, plan a route, and drive. The new approach asks it to mark the key landmarks on the map first, then drive using its own markings.
+
+The general principle is well-established: you do not improve a model by adding more parameters, you improve it by choosing the right structure. The scaffolding fields are structural constraints on the model's reasoning — like well-chosen priors that guide inference without needing a more complex likelihood. The intelligence is in the schema design, not in the rules.
+
+#### Why other sections should not regress
+
+The seniority section is identical — not a single word changed. Same for `job_family`, company fields, education, responsibilities, and years of experience. Every rule that was working is preserved verbatim. The restructuring only touched the skills section.
+
+Additionally, the prompt is now ~300 lines shorter (salary, `remote_policy`, `employment_type` fields removed in schema simplification; ~150 lines of skills scaffolding replaced with ~60). Less total content competing for attention means more attention budget available for the unchanged sections. Removing irrelevant content improves performance on remaining content — the same principle as regularisation in model training.
+
+#### The mental model shift
+
+The v1–v27 approach treated the LLM as a rule interpreter: give it precise rules, expect precise execution. That works for a large model with deep reasoning capacity. For a small model doing structured output generation, the effective approach is different: make the rules simple enough that the model can hold them, then structure the output schema so the model's own generation helps it reason. The intelligence is no longer in the rules — it is in the schema design that enforces the right reasoning sequence.
+
+`preferred_signals_found` is a structural constraint on the model's reasoning process: the schema design forces the model to externalise its classification anchors before the fields that depend on them. This is more reliable than relying on the model to hold and apply multiple interacting rules from memory during generation.
+
+**Implementation details**:
+- Two scaffolding fields declared before all skills fields in `Job` schema; instructor fills in declaration order:
+  - `responsibility_skills_found` — model scans responsibility statements and lists all embedded skill tokens first
+  - `preferred_signals_found` — model lists all optionality phrases second
+- Both fields stripped from HuggingFace push (`_PIPELINE_INTERNAL_COLS` in `hub.py`) and excluded from judge evaluation (`_JUDGE_EXCLUDE` in `judge.py`) — scaffolding, not dataset features
+- Both displayed in `human_eval.py` `show_extraction()` as dedicated debug sections — show exactly what the model externalised before classifying, directly useful for verifying both responsibility scanning and preferred zone detection
+- Prompt simplified from ~250 lines (skills section) to ~60 lines; total prompt ~300 lines shorter than v27
+
+**v29–v30 — iterative refinements**: Four extraction runs (v29, v29b, v29c, v30) applied micro-refinements to field descriptions, scope constraints, and CV test calibration after reviewing v28 extractions. Each addressed narrow observed noise without structural change.
+
+**Field ordering — preferred before required (v31)**: Skills field order in the schema was tested in both directions. Empirical finding: `skills_preferred` must be declared before `skills_required` in the schema (instructor fills in declaration order). The blast radius is asymmetric — preferred-first can only pull a bounded set of skills out of required (those near optionality language), whereas required-first can pull any preferred skill from anywhere in the posting into required (unbounded). Required-first produces larger, less predictable required lists; preferred-first produces tighter required lists with a small bounded error risk on the preferred side. Final schema order: `responsibility_skills_found` → `preferred_signals_found` → `skills_preferred` → `skills_required` → `skills_soft`.
+
+**Schema simplification**: `salary_min`, `salary_max`, `salary_currency`, `salary_period`, `remote_policy`, `employment_type` removed from `Job` and `EvaluationScore`. These fields are almost never disclosed in the postings used, producing near-universal nulls. Their extraction rules and judge dimensions were contributing prompt length and attention cost with negligible signal value.
+
+### 9.14 Post-processing layer — rationale and design
+
+#### Why it's needed
+
+The extraction prompt and schema are optimised for the hard classification problem: separating required, preferred, and soft skills using chain-of-thought scaffolding. This works. However, a small model (gpt-5.4-mini) has a ceiling on semantic judgment tasks that no amount of prompt engineering can raise. Four categories of noise survive the prompt and are observed consistently across test postings:
+
+1. **Activity nouns in `skills_required`** — tokens like "quantum approaches", "visualizing data", "data quality", "analytics platform" describe what the person will do, not what they must know. The CV test instruction exists in the prompt but the model applies it inconsistently.
+
+2. **Responsibilities leaking into `skills_soft`** — tokens like "collaborate within a small team", "train Developers/Analysts", "independently research problems" are job duties phrased as soft skills. The model does not reliably distinguish a behavioural skill from a responsibility that involves interpersonal behaviour.
+
+3. **Normalisation inconsistency** — "Tensor" instead of "TensorFlow", "MS Visual Studio" instead of "Visual Studio", "ML/DL" as a combined token. These multiply across thousands of postings into fragmented aggregations where the same skill appears under multiple names.
+
+4. **Occasional classification errors despite correct detection** — the scaffolding field correctly captures optionality signals but the model occasionally ignores its own prior output when filling downstream fields.
+
+These are model-level limitations, not prompt-level bugs. Additional prompt rules for these issues were tested and had no measurable effect on output. The correct fix is a deterministic post-processing pass, not more prompt engineering.
+
+#### Design
+
+A deterministic Python function applied to each extracted `Job` object after the LLM returns it — no additional LLM calls, pure rule-based cleanup:
+
+```python
+def postprocess(job: Job) -> Job:
+    """Deterministic cleanup of known model-level noise patterns."""
+    ...
+    return job
+```
+
+Called in `pipeline.py` between extraction and serialisation. Four components:
+
+- **Skills normalisation map** — dictionary mapping known variants to canonical forms (e.g. "Tensor" → "TensorFlow", "MS Excel" → "Excel", "Amazon Web Services" → "AWS"). Built iteratively from the actual dataset: run the full batch first, aggregate all skill tokens, identify variant clusters, build the map.
+- **Slash/combined token splitting** — split tokens like "ML/DL" or "Scala/Java" into separate entries.
+- **Activity token filter** — blocklist of generic nouns and activity phrases that consistently appear as false-positive skills. Built from the full dataset by identifying high-frequency tokens that would not pass manual review as CV skills.
+- **Soft skill responsibility filter** — remove `skills_soft` entries that are clearly responsibilities (leading verb + task description pattern rather than a behavioural quality).
+- **Post-normalisation deduplication** — remove any literal string that appears in both `skills_required` and `skills_preferred` after normalisation (normalisation can create new collisions that the LLM dedup rule didn't catch).
+
+#### When to build it
+
+After the full batch extraction completes. The filters must be data-driven — built from the actual distribution of noise tokens across thousands of postings, not from a handful of test cases. Run first, analyse the aggregated skill token distribution, then build targeted filters for the patterns that appear at scale.
+
 ---
 
 ## 10. Outstanding Issues / Next Steps
@@ -553,9 +710,14 @@ After confirming v24 prompt stability, the extraction model was upgraded from `g
 - [x] **Ground truth annotation deferred** — human annotation was evaluated and rejected as a pre-batch gate. Key reasons: (1) many fields require interpretation, making annotations a second opinion rather than objective ground truth; (2) annotator shares domain blind spots with the extractor; (3) the 9-run eval history with stable ceiling scores provides sufficient confidence. Annotation framework preserved in `tests/ground_truth_annotation/` for future use if a domain expert or downstream task demands it.
 - [x] **Human evaluation completed** — 10 jobs scored on v20 extractions. Extraction quality confirmed excellent. Judge bias identified and structurally fixed in v21 (skills_soft, seniority). `compare()` used for calibration check.
 - [x] **Schema field completion (v24, 2026-04-01)** — added missing system prompt rules for `remote_policy`, `employment_type`, `salary_min`/`salary_max`; analyst catch-all for `job_family`; CRITICAL dual-field skills/responsibilities rule. Judge prompt updated to match. See §9.9.
-- [ ] **Manual evaluation of v24-gpt5.4-mini extractions** — score the first 10 jobs to validate extraction quality and confirm the model upgrade produces clean output. If confirmed, v24-gpt5.4-mini is used for the full batch and all future ingestion.
+- [x] **Manual evaluation of v24-gpt5.4-mini extractions** — systematic skills_preferred misclassification identified across ~4 of 8 reviewed jobs. Prompt fixes applied in v25. See §9.11.
+- [x] **v25–v26 patch attempts** — v25 targeted modifier/deduplication fixes; v26 added decision-tree structure without skill definition gate. Both superseded by v27 architectural redesign. See §9.12.
+- [x] **v28–v31 architectural redesign and refinement** — schema-enforced chain-of-thought via two scaffolding fields (`responsibility_skills_found`, `preferred_signals_found`); prompt simplified from ~250 to ~60 lines; salary/remote/employment fields removed; preferred-first field ordering confirmed. See §9.13.
+- [x] **v31 locked as batch prompt** — preferred-first field ordering confirmed (blast radius asymmetry); v29–v30 micro-refinements applied; post-processing layer design documented. Human eval of v31 in progress.
+- [ ] **Human eval of v31 extractions** — validate final locked prompt before batch. Run dir: `eval_results/20260402_061928_v31`.
 - [ ] `industry_accuracy` (~2.66) is the weakest remaining dimension. **Architectural fix deferred**: a company enrichment agent (web search / company page lookup) will supply ground-truth sector context at the recommendation step, rather than inferring from recruiter-written job descriptions. No further prompt iteration planned.
 - [ ] Run full pipeline on all ~3,892 DS records (lite mode, `python -m src.data_ingestion.pipeline`). **Prompt locked pending manual eval confirmation.**
+- [ ] **Post-processing layer** — build `postprocess(job: Job) -> Job` in `pipeline.py` after full batch run. Four components: normalisation map, slash-token splitter, activity token blocklist, soft skill responsibility filter. Data-driven — build from full batch aggregated token distribution. See §9.14.
 - [ ] This prompt is the ingestion pipeline for all future data — treat as stable unless a systematic extraction failure is identified through human audit.
 - [ ] Push lite dataset to HuggingFace Hub (`Alejandrofupi/ai-jie-jobs-lite`) after batch run.
 
@@ -614,7 +776,25 @@ In order of observed impact:
 
 6. **Example quality** — examples should illustrate the principle, not substitute for it. Where examples dominated the rule (as in early skills_soft), the extractor would generalise to the examples rather than the intent. Principle-first, examples-to-illustrate.
 
-### 11.4 What was deliberately not done
+### 11.4 The attention budget constraint
+
+The most important insight from the v24–v28 trajectory is that prompt engineering for small LLMs doing structured output generation is not a rule-writing problem — it is an attention allocation problem.
+
+Rules in a prompt are not executed sequentially like code. They compete for attention at generation time, with recency bias (later content attends more strongly) and salience bias (headers, CRITICAL labels, dense instruction blocks). When the most important rule is buried deep in a long section, it will systematically lose to less important rules that happen to be closer to the generation point.
+
+The practical implications:
+
+1. **Prompt length is a direct cost, not a neutral expansion** — every token added to the prompt dilutes attention on every other token. The correct question is not "is this rule correct?" but "does adding this rule buy more than it costs in attention dilution?"
+
+2. **The most important rule should be the first thing the model reads in its section, not the last** — recency bias means the rule the model encounters last (closest to generation) has the strongest effect. Place the most critical constraint at the start of the section, not as a trailing CRITICAL block.
+
+3. **Adding a rule to fix a rule violation often makes it worse** — if the root cause is the existing rule being buried, adding another rule buries it further. The correct fix is structural: shorten everything else so the critical rule is closer to generation.
+
+4. **Schema structure is a stronger constraint than prompt rules** — forcing the model to externalise intermediate reasoning into schema fields (like `preferred_signals_found`) is more reliable than asking it to retain that reasoning in implicit working memory while generating subsequent fields. Schema design is the highest-leverage prompt engineering tool available when using instructor.
+
+5. **Removing irrelevant content improves performance on retained content** — stripping the salary, remote, and employment sections improved the entire prompt, not just those fields. Less noise improves signal on everything that remains. This is the same principle as L1 regularisation: sparsity is a feature, not just efficiency.
+
+### 11.5 What was deliberately not done
 
 - **Few-shot examples in the extractor prompt**: Would improve scores on the specific examples but risk over-fitting the model to those patterns. Structural rules generalise better.
 - **Ground truth annotation as a pre-batch gate**: Evaluated and rejected. Many fields require interpretation; a human annotator shares the same domain blind spots as the model. The human eval of 10 extractions was more useful as a calibration check than formal annotation would have been.

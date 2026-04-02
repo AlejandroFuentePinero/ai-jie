@@ -127,16 +127,20 @@ class HumanEvalSession:
             print(f"row_id {row_id} not found in extractions.jsonl")
             return
 
-        skip = {"_row_id", "title", "description", "location", "prompt_version"}
+        skip = {"_row_id", "title", "description", "location", "prompt_version",
+                "preferred_signals_found", "responsibility_skills_found"}
         fields = {k: v for k, v in ext.items() if k not in skip}
 
         groups = {
-            "Company": ["company_name", "company_description", "remote_policy", "employment_type"],
+            "Company": ["company_name", "company_description"],
             "Role": ["seniority", "job_family", "years_experience_min", "years_experience_max",
                      "education_required", "key_responsibilities"],
             "Skills": ["skills_required", "skills_preferred", "skills_soft"],
-            "Compensation": ["salary_min", "salary_max", "salary_currency", "salary_period"],
         }
+
+        # Chain-of-thought scaffolding — shown separately for human eval debugging
+        responsibility_skills = ext.get("responsibility_skills_found")
+        preferred_signals = ext.get("preferred_signals_found")
 
         try:
             from IPython.display import Markdown, display
@@ -151,12 +155,35 @@ class HumanEvalSession:
                         formatted = str(v) if v is not None else "—"
                     lines.append(f"- **{k}**: {formatted}")
                 lines.append("")
+            # Scaffolding fields — show what the model identified before classifying skills;
+            # responsibility_skills_found verifies responsibility scanning;
+            # preferred_signals_found verifies optionality zone detection
+            lines.append("### Scaffolding: responsibility_skills_found")
+            if responsibility_skills:
+                lines.append(", ".join(str(s) for s in responsibility_skills))
+            else:
+                lines.append("— (null — no responsibility-embedded skills found)")
+            lines.append("")
+            lines.append("### Scaffolding: preferred_signals_found")
+            if preferred_signals:
+                for s in preferred_signals:
+                    lines.append(f"- {s}")
+            else:
+                lines.append("— (null — no optionality language found)")
             display(Markdown("\n".join(lines)))
         except ImportError:
             for group, keys in groups.items():
                 print(f"\n{group}")
                 for k in keys:
                     print(f"  {k}: {fields.get(k)}")
+            print("\nScaffolding: responsibility_skills_found")
+            print(f"  {', '.join(str(s) for s in responsibility_skills)}" if responsibility_skills else "  — (null)")
+            print("\nScaffolding: preferred_signals_found")
+            if preferred_signals:
+                for s in preferred_signals:
+                    print(f"  - {s}")
+            else:
+                print("  — (null)")
 
     # ── Scoring ───────────────────────────────────────────────────────────────
 
@@ -166,8 +193,6 @@ class HumanEvalSession:
         *,
         company_name_accuracy: int,
         company_description_accuracy: int,
-        remote_policy_accuracy: int,
-        employment_type_accuracy: int,
         seniority_accuracy: int,
         job_family_accuracy: int,
         years_experience_accuracy: int,
@@ -176,7 +201,6 @@ class HumanEvalSession:
         skills_required_accuracy: int,
         skills_preferred_accuracy: int,
         skills_soft_accuracy: int,
-        salary_accuracy: int,
         null_appropriateness: int,
         overall: int,
         flags: list[str] | None = None,
@@ -204,8 +228,6 @@ class HumanEvalSession:
         score_obj = EvaluationScore(
             company_name_accuracy=company_name_accuracy,
             company_description_accuracy=company_description_accuracy,
-            remote_policy_accuracy=remote_policy_accuracy,
-            employment_type_accuracy=employment_type_accuracy,
             seniority_accuracy=seniority_accuracy,
             job_family_accuracy=job_family_accuracy,
             years_experience_accuracy=years_experience_accuracy,
@@ -214,7 +236,6 @@ class HumanEvalSession:
             skills_required_accuracy=skills_required_accuracy,
             skills_preferred_accuracy=skills_preferred_accuracy,
             skills_soft_accuracy=skills_soft_accuracy,
-            salary_accuracy=salary_accuracy,
             null_appropriateness=null_appropriateness,
             overall=overall,
             flags=flags or [],
