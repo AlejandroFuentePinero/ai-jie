@@ -813,8 +813,92 @@ The practical implications:
 
 5. **Removing irrelevant content improves performance on retained content** — stripping the salary, remote, and employment sections improved the entire prompt, not just those fields. Less noise improves signal on everything that remains. This is the same principle as L1 regularisation: sparsity is a feature, not just efficiency.
 
-### 11.5 What was deliberately not done
+### 11.5 The extract-then-classify architecture (v32 retrospective, 2026-04-02)
+
+This section documents the complete decision path from the original prompt to the final v32 architecture. The journey took a full day and nine extraction runs. The destination was known in principle from early in the session — the path to it was not.
+
+#### Where we started
+
+The prompt had accumulated ~600 lines over four days of iterative work. Everything worked except skills classification — specifically, preferred skills were being labelled as required. The skills section alone was ~250 lines with three stages, four steps, scope windows, asymmetric hierarchies, and processing orders. A small model (gpt-5.4-mini) couldn't hold all of that in working memory while generating structured output.
+
+#### The first insight: proficiency vs optionality confusion
+
+The root cause of most preferred misclassifications was the model confusing proficiency language ("strong", "deep knowledge of", "proficiency in") with optionality language ("preferred", "a plus", "nice to have"). When a posting said "strong proficiency in Python is a plus," the model saw "strong proficiency" and classified Python as required, ignoring "is a plus." This wasn't a missing rule — the rule existed. It was buried 150 lines into the skills section where the model couldn't attend to it during generation.
+
+#### The second insight: structure over rules
+
+Each attempt to fix the confusion by adding more rules failed. The model kept defaulting to the same heuristic regardless. This is when the approach shifted from "add better rules" to "change the architecture so the model doesn't need to hold complex rules." The key realisation: instructor fills schema fields in declaration order. If each reasoning step is a schema field, the model's own output becomes its working memory. It wouldn't need to hold rules in its head because the answers would be in the tokens it just generated.
+
+#### The preferred_signals_found breakthrough
+
+Adding `preferred_signals_found` as a scaffolding field before the skills fields forced the model to write down every optionality sentence before classifying any skill. Preferred classification went from ~20% to ~80% correct across test postings. At the same time, the prompt was radically simplified — skills section from ~250 lines to ~60 lines. The multi-stage algorithm, scope window explanations, and hierarchy rules were removed. The optionality-vs-proficiency distinction was front-loaded as the first thing in the skills section.
+
+#### The responsibility_skills_found experiment
+
+A second scaffolding field for skills found in responsibility statements was added — those should always be required. This had mixed results: the model couldn't reliably distinguish responsibility sections from qualification sections in freetext and scanned too broadly, sometimes overriding preferred classification. The field description was narrowed but the model continued scanning too broadly. Despite this, the field provides useful ground truth for post-processing and was kept.
+
+#### The ordering problem
+
+Even with scaffolding, several postings consistently showed the model detecting preferred zones correctly but not applying them during classification. The model would fill `skills_required` first, vacuum up everything, and have nothing left for `skills_preferred`. Reversing the schema order (preferred before required) fixed this — but introduced the opposite problem: skills that should be required got pulled into preferred first because they appeared in preferred signal sentences despite also being in responsibilities. Whichever field filled first stole skills from the other. There was no correct fill order with this two-field partitioning design.
+
+#### The final architecture: extract then classify
+
+The solution was proposed early in the session and dismissed — "extract all skills first, then classify." The objection was "two API calls." It doesn't require two API calls: it requires one additional scaffolding field.
+
+`all_technical_skills` captures every technical skill in the posting with no classification pressure. It is the simplest possible task: list what you see. Then `skills_preferred` partitions that list by selecting skills appearing in preferred zones. Then `skills_required` gets everything remaining. Extraction and classification are fully separated. The ordering problem disappears because both classification fields are partitioning the same already-complete list — nothing can be lost.
+
+**Final generation sequence:**
+
+1. `responsibility_skills_found` — scan duties section only, list skill tokens
+2. `preferred_signals_found` — find optionality sentences, copy them verbatim
+3. `all_technical_skills` — extract every technical skill, flat list, no classification pressure
+4. `skills_preferred` — partition: skills from preferred zones, excluding responsibility skills
+5. `skills_required` — partition: everything else from `all_technical_skills`
+6. `skills_soft` — separate routing for interpersonal skills
+
+Each step is simple and self-contained. The model never simultaneously extracts and classifies.
+
+#### What the test results show
+
+- **IBM**: machine learning, linear algebra, Qiskit Aqua, Qiskit Terra, quantum circuit design — all recovered in required after being lost in the preferred-first version. Python, Jupyter, Tensor, NumPy correctly in preferred.
+- **Oaktree**: Python, R, C#, Visual Studio, Big Data, ML, AI, Deep Learning all correctly in preferred. Required now includes domain skills (bonds, derivatives, structured products, investment finance) not captured before. CFA/FRM detection miss — unusual optionality pattern ("Preference will be given to").
+- **PulsePoint**: Scala, Java, Cloud migration correctly in preferred. Python and Hadoop still in preferred — model doesn't apply the responsibility exclusion rule reliably.
+- **Vertex**: organic synthesis in preferred despite being in `responsibility_skills_found` — same exclusion rule failure.
+
+#### What works (production-ready)
+
+- All non-skills fields: company name, seniority, job family, years of experience, education, responsibilities. Stable across all iterations; prompt simplification gave them proportionally more attention budget.
+- Preferred signal detection: 9/10 postings. Scaffolding captures full sentences containing optionality language reliably.
+- Skill completeness: every skill mentioned in the posting appears in `all_technical_skills`. This is the structural guarantee — extraction is complete because it happens before classification.
+- Preferred classification: ~8/10 postings correct.
+
+#### What doesn't work and can't be fixed by prompt
+
+**Responsibility exclusion inconsistency**: the model has the data in `responsibility_skills_found` but doesn't reliably cross-reference it when partitioning. Fixable with the deterministic `postprocess()` function — two lines of Python, guaranteed correct. Implemented in `src/data_ingestion/postprocess.py`.
+
+**CV test enforcement**: activities ("visualizing data"), generic nouns ("systems"), team roles ("data scientists"), and marketing activities ("webinars") leak into `skills_required`. The model either has the judgment to apply the CV test or it doesn't — more prompt text didn't change this across multiple iterations. Post-processing blocklist is the right fix.
+
+**Soft skill filtering**: responsibilities leak in as soft skills ("collaborate within a small team", "training developers"), boilerplate passes through ("initiative", "work ethic"). Same model-level ceiling. Post-processing verb-led phrase filter is the right fix.
+
+**Normalisation inconsistency**: "Tensor" instead of "TensorFlow", occasional duplication. Deterministic synonym map post-extraction.
+
+These are not LLM tasks — they are string operations. Using a language model for them is the wrong tool.
+
+#### Why this version and not more iteration
+
+Three reasons:
+
+1. **Diminishing returns**: the jump from original prompt to scaffolding architecture was massive. Every iteration since has been marginal. The remaining issues have been stable across four prompt iterations — they don't respond to prompt changes.
+
+2. **Regression risk**: every prompt change risks breaking seniority, job family, and preferred detection — all finely tuned and currently working. The post-processing path does not touch the prompt.
+
+3. **Wrong tool for remaining work**: the responsibility override is a set intersection — deterministic, instant, guaranteed correct. The CV test failures follow patterns that a regex or blocklist handles more reliably than a language model. These are engineering problems, not prompt engineering problems.
+
+**The prompt is done. The model is at its ceiling. Everything from here is engineering.**
+
+### 11.6 What was deliberately not done
 
 - **Few-shot examples in the extractor prompt**: Would improve scores on the specific examples but risk over-fitting the model to those patterns. Structural rules generalise better.
 - **Ground truth annotation as a pre-batch gate**: Evaluated and rejected. Many fields require interpretation; a human annotator shares the same domain blind spots as the model. The human eval of 10 extractions was more useful as a calibration check than formal annotation would have been.
 - **Continued prompt iteration after the plateau**: Once the plateau was confirmed at v20b/v21/v22, further optimisation against judge scores would have been overfitting. The remaining judge gaps (skills_required ~2.46 vs v16 baseline ~2.78) are judge drift, not extraction failures.
+- **Two-API-call extraction+classification**: considered as the clean solution to the ordering problem, rejected as too expensive. The correct answer was one additional scaffolding field (`all_technical_skills`) that separates extraction from classification without an additional API call.
