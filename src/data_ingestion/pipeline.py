@@ -22,6 +22,7 @@ import pandas as pd
 from tqdm.asyncio import tqdm_asyncio
 
 from .parser import parse_posting_async
+from .postprocess import postprocess
 
 logger = logging.getLogger(__name__)
 
@@ -87,6 +88,7 @@ async def run_pipeline(
                     row["title"], row["description"], row["location"],
                     sector=None if pd.isna(_sector) else _sector,
                 )
+                extracted = postprocess(extracted)
                 record = {"_row_id": row_id, "prompt_version": prompt_version, **extracted.model_dump()}
                 out_file.write(json.dumps(record, default=str) + "\n")
                 out_file.flush()

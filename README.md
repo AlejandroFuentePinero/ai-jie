@@ -200,7 +200,7 @@ After any new run, regenerate the trajectory plots:
 python -m src.evals.eval_trend
 ```
 
-### Current prompt: v31 (human eval in progress before batch)
+### Current prompt: v32 (human eval in progress before batch)
 
 **Stage 1 canonical baseline**: v9g (seed=42, overall=2.98) — validated on three independent seeds.
 
@@ -225,7 +225,8 @@ Stage 2 trajectory (seed=42, n=50):
 | v27 | — | — | — | — | — | — | Skills section redesign: skill gate, soft routing, scope-aware classification. Superseded by v28. |
 | v28 | — | — | — | — | — | — | Schema chain-of-thought: `responsibility_skills_found` + `preferred_signals_found` scaffolding; prompt ~250→60 lines; salary/remote/employment removed |
 | v29–v30 | — | — | — | — | — | — | Iterative micro-refinements: field description tightening, scope constraints, CV test calibration |
-| **v31** | — | — | — | — | — | — | **Locked batch prompt** — preferred-first field ordering (blast radius asymmetry confirmed); schema: scaffolding → skills_preferred → skills_required → skills_soft |
+| v31 | — | — | — | — | — | — | Preferred-first field ordering (blast radius asymmetry confirmed); schema: scaffolding → skills_preferred → skills_required → skills_soft |
+| **v32** | — | — | — | — | — | — | **Locked batch prompt** — 3rd scaffolding field `all_technical_skills`; deterministic `postprocess()` enforces responsibility exclusion guarantee |
 
 See [`docs/technical_report.md`](docs/technical_report.md) for the full version history and design decisions.
 

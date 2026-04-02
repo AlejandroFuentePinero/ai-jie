@@ -269,14 +269,20 @@ instance creates a preferred zone:
     ("is required", "must have", "essential"), that individual skill is
     required, not preferred.
 
-**skills_preferred** — FILL FIRST. Extract technical skills (per the CV
-test) from the preferred zones identified above. Null if no optionality
-language exists in the posting.
+**all_technical_skills** — list EVERY technical skill (per the CV test)
+mentioned anywhere in the posting. Scan responsibilities, requirements,
+qualifications, and preferred sections. This is a flat extraction with
+no classification — just list every skill token. Normalise to standard
+professional form (e.g. "Amazon Web Services" → "AWS").
 
-**skills_required** — FILL SECOND. All remaining technical skills (per
-the CV test) NOT already listed in skills_preferred. Include skills from
-responsibility_skills_found. Normalise to standard professional form
-(e.g. "Amazon Web Services" → "AWS").
+**skills_preferred** — from all_technical_skills, select ONLY skills
+that appear in a preferred zone from preferred_signals_found. Exclude
+any skill that also appears in responsibility_skills_found — a skill
+the person will actively use on the job is always required. Null if no
+optionality language exists in the posting.
+
+**skills_required** — all skills from all_technical_skills NOT listed
+in skills_preferred above.
 
 **skills_soft** — all interpersonal and behavioural skills. Condense to
 concise phrases (2–7 words). Include only skills the employer described

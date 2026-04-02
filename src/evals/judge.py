@@ -207,7 +207,7 @@ def _build_user_message(job_title: str, description: str, extracted: Job) -> str
     # Strip passthrough fields and scaffolding fields before sending to judge.
     # description creates circular evaluation; title/location have no ground-truth.
     # preferred_signals_found is chain-of-thought scaffolding — not a quality target.
-    _JUDGE_EXCLUDE = {"title", "description", "location", "preferred_signals_found", "responsibility_skills_found"}
+    _JUDGE_EXCLUDE = {"title", "description", "location", "responsibility_skills_found", "preferred_signals_found", "all_technical_skills"}
     extracted_dict = {
         k: v for k, v in extracted.model_dump().items()
         if k not in _JUDGE_EXCLUDE

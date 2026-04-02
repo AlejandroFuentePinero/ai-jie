@@ -128,7 +128,7 @@ class HumanEvalSession:
             return
 
         skip = {"_row_id", "title", "description", "location", "prompt_version",
-                "preferred_signals_found", "responsibility_skills_found"}
+                "responsibility_skills_found", "preferred_signals_found", "all_technical_skills"}
         fields = {k: v for k, v in ext.items() if k not in skip}
 
         groups = {
@@ -141,6 +141,7 @@ class HumanEvalSession:
         # Chain-of-thought scaffolding — shown separately for human eval debugging
         responsibility_skills = ext.get("responsibility_skills_found")
         preferred_signals = ext.get("preferred_signals_found")
+        all_technical = ext.get("all_technical_skills")
 
         try:
             from IPython.display import Markdown, display
@@ -155,9 +156,7 @@ class HumanEvalSession:
                         formatted = str(v) if v is not None else "—"
                     lines.append(f"- **{k}**: {formatted}")
                 lines.append("")
-            # Scaffolding fields — show what the model identified before classifying skills;
-            # responsibility_skills_found verifies responsibility scanning;
-            # preferred_signals_found verifies optionality zone detection
+            # Scaffolding fields — show what the model identified before classifying skills
             lines.append("### Scaffolding: responsibility_skills_found")
             if responsibility_skills:
                 lines.append(", ".join(str(s) for s in responsibility_skills))
@@ -170,6 +169,12 @@ class HumanEvalSession:
                     lines.append(f"- {s}")
             else:
                 lines.append("— (null — no optionality language found)")
+            lines.append("")
+            lines.append("### Scaffolding: all_technical_skills")
+            if all_technical:
+                lines.append(", ".join(str(s) for s in all_technical))
+            else:
+                lines.append("— (null — no technical skills found)")
             display(Markdown("\n".join(lines)))
         except ImportError:
             for group, keys in groups.items():
@@ -184,6 +189,8 @@ class HumanEvalSession:
                     print(f"  - {s}")
             else:
                 print("  — (null)")
+            print("\nScaffolding: all_technical_skills")
+            print(f"  {', '.join(str(s) for s in all_technical)}" if all_technical else "  — (null)")
 
     # ── Scoring ───────────────────────────────────────────────────────────────
 

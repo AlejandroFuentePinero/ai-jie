@@ -101,22 +101,32 @@ class Job(BaseModel):
             "needed for classification. Null if none exist."
         ),
     )
+    all_technical_skills: Optional[list[str]] = Field(
+        None,
+        description=(
+            "FILL THIRD. List EVERY technical skill mentioned anywhere "
+            "in the posting — responsibilities, requirements, qualifications, "
+            "and preferred sections. Flat list, no classification. "
+            "Apply the CV test: only named technologies, tools, methodologies, "
+            "and domain expertise areas."
+        ),
+    )
 
-    # --- Skills classification ---
+    # --- Skills classification (partition all_technical_skills) ---
     skills_preferred: Optional[list[str]] = Field(
         None,
         description=(
-            "FILL FIRST from skills. Extract technical skills from the "
-            "preferred zones identified above. Null if no optionality "
-            "language in the posting."
+            "From all_technical_skills, select ONLY skills that appear "
+            "in a preferred zone from preferred_signals_found. Exclude "
+            "any skill that also appears in responsibility_skills_found. "
+            "Null if no optionality language in the posting."
         ),
     )
     skills_required: Optional[list[str]] = Field(
         None,
         description=(
-            "All remaining technical skills NOT already listed in "
-            "skills_preferred above. Skills named in responsibility "
-            "statements are always required."
+            "All skills from all_technical_skills NOT listed in "
+            "skills_preferred above."
         ),
     )
     skills_soft: Optional[list[str]] = Field(

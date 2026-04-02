@@ -34,6 +34,7 @@ from tqdm.asyncio import tqdm_asyncio
 from src.data_ingestion.parser import MODEL as EXTRACTION_MODEL
 from src.data_ingestion.parser import SYSTEM_PROMPT as EXTRACTION_PROMPT
 from src.data_ingestion.parser import parse_posting_async
+from src.data_ingestion.postprocess import postprocess
 from src.evals.judge import JUDGE_MODEL, JUDGE_PROMPT, judge_extraction_async
 from src.evals.report import build_report, print_summary, save_report
 
@@ -123,6 +124,7 @@ async def run_eval(
                     row["title"], row["description"], row["location"],
                     sector=None if pd.isna(_sector) else _sector,
                 )
+                extracted = postprocess(extracted)
             except Exception as exc:
                 failures.append({
                     "_row_id": row_id,

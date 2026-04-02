@@ -688,9 +688,27 @@ Called in `pipeline.py` between extraction and serialisation. Four components:
 - **Soft skill responsibility filter** — remove `skills_soft` entries that are clearly responsibilities (leading verb + task description pattern rather than a behavioural quality).
 - **Post-normalisation deduplication** — remove any literal string that appears in both `skills_required` and `skills_preferred` after normalisation (normalisation can create new collisions that the LLM dedup rule didn't catch).
 
-#### When to build it
+#### First component — implemented (v32)
 
-After the full batch extraction completes. The filters must be data-driven — built from the actual distribution of noise tokens across thousands of postings, not from a handful of test cases. Run first, analyse the aggregated skill token distribution, then build targeted filters for the patterns that appear at scale.
+The responsibility exclusion rule was the first component implemented, triggered by human evaluation of v32 extractions confirming the architecture solved skill completeness but the responsibility exclusion rule in `skills_preferred` was inconsistently applied by the model despite being in `responsibility_skills_found`.
+
+`src/data_ingestion/postprocess.py`:
+```python
+def postprocess(job: Job) -> Job:
+    if job.responsibility_skills_found and job.skills_preferred:
+        resp_set = set(job.responsibility_skills_found)
+        overlap = [s for s in job.skills_preferred if s in resp_set]
+        if overlap:
+            job.skills_preferred = [s for s in job.skills_preferred if s not in resp_set]
+            job.skills_required = (job.skills_required or []) + sorted(overlap)
+    return job
+```
+
+Called in both `pipeline.py` and `runner.py` immediately after `parse_posting_async()` returns, before serialisation. The scaffolding field `responsibility_skills_found` provides exact ground truth — the model's own output is used to enforce the rule it missed.
+
+#### Remaining components — data-driven, post-batch
+
+The remaining filters (normalisation map, activity token blocklist, soft skill responsibility filter) must be built from the full batch token distribution, not from a handful of test cases. Run first, analyse the aggregated skill token distribution, then build targeted filters for the patterns that appear at scale.
 
 ---
 
@@ -717,7 +735,8 @@ After the full batch extraction completes. The filters must be data-driven — b
 - [ ] **Human eval of v31 extractions** — validate final locked prompt before batch. Run dir: `eval_results/20260402_061928_v31`.
 - [ ] `industry_accuracy` (~2.66) is the weakest remaining dimension. **Architectural fix deferred**: a company enrichment agent (web search / company page lookup) will supply ground-truth sector context at the recommendation step, rather than inferring from recruiter-written job descriptions. No further prompt iteration planned.
 - [ ] Run full pipeline on all ~3,892 DS records (lite mode, `python -m src.data_ingestion.pipeline`). **Prompt locked pending manual eval confirmation.**
-- [ ] **Post-processing layer** — build `postprocess(job: Job) -> Job` in `pipeline.py` after full batch run. Four components: normalisation map, slash-token splitter, activity token blocklist, soft skill responsibility filter. Data-driven — build from full batch aggregated token distribution. See §9.14.
+- [x] **Post-processing layer — first component implemented** — `src/data_ingestion/postprocess.py`: responsibility exclusion fix (skills found in `responsibility_skills_found` removed from `skills_preferred`, moved to `skills_required`). Called in `pipeline.py` and `runner.py` after extraction. See §9.14.
+- [ ] **Post-processing layer — remaining components** — normalisation map, slash-token splitter, activity token blocklist, soft skill responsibility filter. Data-driven — build from full batch token distribution after batch run.
 - [ ] This prompt is the ingestion pipeline for all future data — treat as stable unless a systematic extraction failure is identified through human audit.
 - [ ] Push lite dataset to HuggingFace Hub (`Alejandrofupi/ai-jie-jobs-lite`) after batch run.
 

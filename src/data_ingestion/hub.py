@@ -28,7 +28,7 @@ HF_REPO_LITE = "Alejandrofupi/ai-jie-jobs-lite"   # DS only
 HF_REPO_FULL = "Alejandrofupi/ai-jie-jobs-full"   # DS + DA
 
 # Internal columns added by the pipeline that are not part of the Job schema.
-_PIPELINE_INTERNAL_COLS = {"_row_id", "prompt_version", "preferred_signals_found", "responsibility_skills_found"}
+_PIPELINE_INTERNAL_COLS = {"_row_id", "prompt_version", "responsibility_skills_found", "preferred_signals_found", "all_technical_skills"}
 
 
 def push_to_hub(
