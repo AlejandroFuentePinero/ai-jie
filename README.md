@@ -110,11 +110,22 @@ python -m src.data_ingestion.loader
 ### Push to / load from HuggingFace Hub
 
 ```python
-from src.data_ingestion.hub import push_to_hub, load_from_hub, HF_REPO_LITE, HF_REPO_FULL
+from src.data_ingestion.hub import (
+    push_to_hub, load_from_hub,
+    HF_REPO_LITE, HF_REPO_FULL,
+    HF_REPO_LITE_POST, HF_REPO_FULL_POST,
+)
 
-push_to_hub(results_df)                        # lite repo (public)
-push_to_hub(results_df, repo_id=HF_REPO_FULL)  # full repo (public)
-df = load_from_hub()                           # pulls lite dataset
+push_to_hub(results_df)                              # preprocessed lite repo (keeps scaffolding)
+push_to_hub(results_df, repo_id=HF_REPO_FULL)        # preprocessed full repo
+df = load_from_hub()                                 # pulls preprocessed lite dataset
+```
+
+Then run batch postprocessing to produce the clean consumer-ready dataset:
+
+```bash
+python -m src.data_ingestion.batch_postprocess        # lite → ai-jie-jobs-lite-postprocessed
+python -m src.data_ingestion.batch_postprocess --full  # full → ai-jie-jobs-full-postprocessed
 ```
 
 ### Run evaluation
@@ -286,5 +297,7 @@ Source data is not committed to this repository. Place the raw CSVs in `data/raw
 Run `python -m src.data_ingestion.loader` once to generate `data/raw/jobs_unified.csv` (used for exploration; the pipeline reads raw CSVs directly).
 
 Processed datasets on HuggingFace Hub (public):
-- Lite (DS only): `Alejandrofupi/ai-jie-jobs-lite`
-- Full (DS + DA): `Alejandrofupi/ai-jie-jobs-full`
+- Preprocessed lite (DS only): `Alejandrofupi/ai-jie-jobs-lite-preprocessed`
+- Preprocessed full (DS + DA): `Alejandrofupi/ai-jie-jobs-full-preprocessed`
+- Postprocessed lite (DS only): `Alejandrofupi/ai-jie-jobs-lite-postprocessed`
+- Postprocessed full (DS + DA): `Alejandrofupi/ai-jie-jobs-full-postprocessed`

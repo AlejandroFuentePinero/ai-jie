@@ -24,36 +24,49 @@ import os
 
 import pandas as pd
 
-HF_REPO_LITE = "Alejandrofupi/ai-jie-jobs-lite"   # DS only
-HF_REPO_FULL = "Alejandrofupi/ai-jie-jobs-full"   # DS + DA
+HF_REPO_LITE = "Alejandrofupi/ai-jie-jobs-lite-preprocessed"    # DS only  — raw LLM output
+HF_REPO_FULL = "Alejandrofupi/ai-jie-jobs-full-preprocessed"    # DS + DA  — raw LLM output
+HF_REPO_LITE_POST = "Alejandrofupi/ai-jie-jobs-lite-postprocessed"  # DS only  — after postprocessing
+HF_REPO_FULL_POST = "Alejandrofupi/ai-jie-jobs-full-postprocessed"  # DS + DA  — after postprocessing
 
-# Internal columns added by the pipeline that are not part of the Job schema.
-_PIPELINE_INTERNAL_COLS = {"_row_id", "prompt_version", "responsibility_skills_found", "preferred_signals_found", "all_technical_skills"}
+# Columns added by the pipeline runner — never useful to dataset consumers.
+_META_COLS = {"_row_id", "prompt_version"}
+
+# Chain-of-thought scaffolding fields — kept in the preprocessed push so that
+# batch_postprocess can read responsibility_skills_found and apply the exclusion
+# rule.  Stripped from the postprocessed push (clean consumer-ready dataset).
+_SCAFFOLDING_COLS = {"responsibility_skills_found", "preferred_signals_found", "all_technical_skills"}
 
 
 def push_to_hub(
     df: pd.DataFrame,
     repo_id: str = HF_REPO_LITE,
     private: bool = False,
+    strip_scaffolding: bool = False,
 ) -> None:
     """
     Push a processed jobs DataFrame to HuggingFace Hub as a Parquet dataset.
 
     Args:
-        df:       DataFrame produced by run_pipeline(). Must contain Job fields.
-        repo_id:  HuggingFace dataset repo in "owner/name" format.
-        private:  Create as a private repo (default True).
-                  Set False only after deliberate review of the data.
+        df:               DataFrame produced by run_pipeline(). Must contain Job fields.
+        repo_id:          HuggingFace dataset repo in "owner/name" format.
+        private:          Create as a private repo (default False).
+        strip_scaffolding: If True, also drop the chain-of-thought scaffolding fields
+                          (responsibility_skills_found, preferred_signals_found,
+                          all_technical_skills).  Use False (default) for the
+                          preprocessed push so that batch_postprocess can apply the
+                          responsibility-exclusion rule from HF.  Use True for the
+                          postprocessed push (clean consumer-ready dataset).
     """
     from datasets import Dataset
 
     token = _get_token()
 
-    # Strip pipeline-internal columns that are not part of the Job schema
-    cols_to_drop = [c for c in _PIPELINE_INTERNAL_COLS if c in df.columns]
+    cols_to_strip = _META_COLS | (_SCAFFOLDING_COLS if strip_scaffolding else set())
+    cols_to_drop = [c for c in cols_to_strip if c in df.columns]
     upload_df = df.drop(columns=cols_to_drop)
 
-    print(f"Pushing {len(upload_df)} rows to {repo_id} ...")
+    print(f"Pushing {len(upload_df)} rows ({len(upload_df.columns)} columns) to {repo_id} ...")
     dataset = Dataset.from_pandas(upload_df, preserve_index=False)
     dataset.push_to_hub(repo_id, token=token, private=private)
     print(f"Done → https://huggingface.co/datasets/{repo_id}")

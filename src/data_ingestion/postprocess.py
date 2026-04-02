@@ -32,10 +32,9 @@ def postprocess(job: Job) -> Job:
     # Responsibility exclusion: any skill the model found in a responsibility statement
     # must not appear in skills_preferred — move it back to skills_required.
     if job.responsibility_skills_found and job.skills_preferred:
-        resp_set = set(job.responsibility_skills_found)
-        overlap = [s for s in job.skills_preferred if s in resp_set]
+        overlap = set(job.skills_preferred) & set(job.responsibility_skills_found)
         if overlap:
-            job.skills_preferred = [s for s in job.skills_preferred if s not in resp_set]
+            job.skills_preferred = [s for s in job.skills_preferred if s not in overlap]
             job.skills_required = (job.skills_required or []) + sorted(overlap)
 
     return job
