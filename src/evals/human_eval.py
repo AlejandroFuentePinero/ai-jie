@@ -2,13 +2,10 @@
 Human evaluation module — review extractions side by side with the original text
 and produce human scores using the same EvaluationScore schema as the judge.
 
-This enables two comparisons:
-  1. Extraction quality: human scores as an independent quality signal
-  2. Judge calibration: where human and judge scores diverge, that is signal
-     about judge bias or miscalibration (dimension-level and row-level)
+Human scores are an independent quality signal for extraction quality.
 
 Output: human_scores.jsonl saved in the same run directory as scores.jsonl,
-keyed on _row_id so the two files can be joined directly.
+keyed on _row_id.
 
 Usage (notebook):
     from src.evals.human_eval import load_run
@@ -27,19 +24,14 @@ Usage (notebook):
         overall=2,
         flags=["seniority_wrong"],
     )
-
-    session.compare()
 """
 
 import json
 import re
 from pathlib import Path
 
-import pandas as pd
-
 from src.config import EVALS_RESULTS_DIR
 from src.data_ingestion.models import EvaluationScore
-from src.evals.report import ALL_SCORE_COLS
 
 
 class HumanEvalSession:
@@ -47,7 +39,6 @@ class HumanEvalSession:
         self.run_dir = run_dir
         self._sample: dict[int, dict] = self._load_jsonl("sample.jsonl")
         self._extractions: dict[int, dict] = self._load_jsonl("extractions.jsonl")
-        self._judge_scores: dict[int, dict] = self._load_jsonl("scores.jsonl")
         self._human_scores: dict[int, dict] = self._load_jsonl("human_scores.jsonl")
 
     # ── Internal helpers ──────────────────────────────────────────────────────
@@ -127,7 +118,7 @@ class HumanEvalSession:
             print(f"row_id {row_id} not found in extractions.jsonl")
             return
 
-        skip = {"_row_id", "title", "description", "location", "prompt_version",
+        skip = {"_row_id", "title", "description", "location", "sector", "prompt_version",
                 "responsibility_skills_found", "preferred_signals_found", "all_technical_skills"}
         fields = {k: v for k, v in ext.items() if k not in skip}
 
@@ -266,60 +257,6 @@ class HumanEvalSession:
             print(f"Next unscored: row_id={nxt}")
         else:
             print("All rows scored — run session.compare() to see results.")
-
-    # ── Comparison ────────────────────────────────────────────────────────────
-
-    def compare(self) -> pd.DataFrame:
-        """
-        Compare human scores against judge scores for all jointly scored rows.
-
-        Returns a DataFrame of per-row deltas (human − judge) per dimension.
-        Positive delta = human scored higher than judge.
-        Negative delta = judge scored higher than human.
-        """
-        if not self._human_scores:
-            print("No human scores yet — score some rows first.")
-            return pd.DataFrame()
-
-        judge_df = (
-            pd.DataFrame(list(self._judge_scores.values()))
-            .set_index("_row_id")
-        )
-        human_df = (
-            pd.DataFrame(list(self._human_scores.values()))
-            .set_index("_row_id")
-        )
-
-        common_ids = judge_df.index.intersection(human_df.index)
-        if common_ids.empty:
-            print("No overlapping row_ids between judge and human scores.")
-            return pd.DataFrame()
-
-        score_cols = [c for c in ALL_SCORE_COLS if c in judge_df.columns and c in human_df.columns]
-        judge_sub = judge_df.loc[common_ids, score_cols]
-        human_sub = human_df.loc[common_ids, score_cols]
-        delta = human_sub - judge_sub
-
-        print(f"\nHuman vs Judge — {len(common_ids)} rows\n{'='*60}")
-        print("\nMean delta (human − judge) per dimension:  [+ = human higher, − = judge higher]")
-
-        mean_delta = delta.mean()
-        for dim, val in mean_delta.items():
-            marker = "▲" if val > 0.05 else ("▼" if val < -0.05 else "—")
-            print(f"  {dim:<38} {val:+.3f}  {marker}")
-
-        print(f"\nMean absolute disagreement:  {delta.abs().mean().mean():.3f}")
-
-        print(f"\nRows with largest total disagreement (|Δ| summed across all dimensions):")
-        total_abs = delta.abs().sum(axis=1).sort_values(ascending=False)
-        for row_id, val in total_abs.head(5).items():
-            judge_overall = judge_df.loc[row_id, "overall"] if row_id in judge_df.index else "—"
-            human_overall = human_df.loc[row_id, "overall"] if row_id in human_df.index else "—"
-            title = self._sample.get(row_id, {}).get("title", "")
-            print(f"  row_id={row_id}  |Δ|={val:.1f}  judge_overall={judge_overall}  human_overall={human_overall}  ({title[:50]})")
-
-        delta.index.name = "_row_id"
-        return delta
 
 
 # ── Entry point ───────────────────────────────────────────────────────────────

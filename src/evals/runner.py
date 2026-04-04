@@ -63,9 +63,8 @@ async def run_eval(
         n:              Sample size. Default 30 (dev). Use 50 for pre-release comparisons.
         seed:           Fixed seed — keep constant when comparing prompt versions.
         prompt_version: Label for this run (e.g. "v1", "v2-shorter-prompt").
-        concurrency:    Max concurrent API calls. Default 3 avoids gpt-4o rate limits
-                        (Tier 1: 500 RPM, but gpt-4o shares quota with other calls).
-                        Raise to 5-8 on Tier 2+.
+        concurrency:    Max concurrent API calls. Default 3 is conservative for Tier 1
+                        (500 RPM shared quota). Raise to 5-8 on Tier 2+.
         judge:          Whether to run the LLM judge. Default True. Pass False to produce
                         extractions.jsonl only (for human eval).
 
@@ -228,6 +227,6 @@ if __name__ == "__main__":
     print(f"Loaded {len(df)} rows")
 
     results = asyncio.run(
-        run_eval(df, output_root=EVALS_RESULTS_DIR, n=RELEASE_N, seed=42, prompt_version="v9g")
+        run_eval(df, output_root=EVALS_RESULTS_DIR, n=RELEASE_N, seed=42, prompt_version="v32")
     )
     print(f"\nFinal results shape: {results.shape}")

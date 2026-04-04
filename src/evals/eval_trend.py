@@ -24,38 +24,11 @@ import matplotlib.pyplot as plt
 import matplotlib.ticker as mticker
 import pandas as pd
 
+from src.evals.report import ALL_SCORE_COLS as DIMENSIONS
+from src.evals.report import SCORE_GROUPS as GROUPS
+
 # Output subfolder inside eval_results/
 EVALS_SUBDIR = "evals"
-
-# All dimensions in a stable display order (superset across all versions)
-DIMENSIONS = [
-    # Company
-    "company_name_accuracy",
-    "company_description_accuracy",
-    # Role
-    "seniority_accuracy",
-    "job_family_accuracy",
-    "years_experience_accuracy",
-    "education_accuracy",
-    "responsibilities_quality",
-    # Skills
-    "skills_required_accuracy",
-    "skills_preferred_accuracy",
-    "skills_soft_accuracy",
-    # Overall
-    "null_appropriateness",
-    "overall",
-]
-
-# Group membership for the per-group subplot
-GROUPS = {
-    "Company":  ["company_name_accuracy", "company_description_accuracy"],
-    "Role":     ["seniority_accuracy", "job_family_accuracy", "years_experience_accuracy",
-                 "education_accuracy", "responsibilities_quality"],
-    "Skills":   ["skills_required_accuracy", "skills_preferred_accuracy",
-                 "skills_soft_accuracy"],
-    "Overall":  ["null_appropriateness", "overall"],
-}
 
 # Short axis labels
 _LABELS = {

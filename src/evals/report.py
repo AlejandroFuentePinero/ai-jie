@@ -5,12 +5,8 @@ Moved from the notebook so they can be reused across runs and scripts.
 
 import json
 from pathlib import Path
-from typing import TYPE_CHECKING
 
 import pandas as pd
-
-if TYPE_CHECKING:
-    pass
 
 SCORE_GROUPS: dict[str, list[str]] = {
     "Company": [
