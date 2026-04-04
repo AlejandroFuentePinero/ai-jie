@@ -30,7 +30,7 @@ async def run_pipeline(
     df: pd.DataFrame,
     output_path: Path,
     concurrency: int = 20,
-    prompt_version: str = "v9",
+    prompt_version: str = "v32",
 ) -> pd.DataFrame:
     """
     Extract structured data from all rows in df using async concurrency.
@@ -138,7 +138,6 @@ def _load_results(path: Path) -> pd.DataFrame:
 if __name__ == "__main__":
     import argparse
     import sys
-    from pathlib import Path
 
     from dotenv import load_dotenv
 
@@ -156,21 +155,39 @@ if __name__ == "__main__":
         default=False,
         help="Process both DataScientist + DataAnalyst CSVs. Default: DS only (lite).",
     )
+    parser.add_argument(
+        "--push",
+        action="store_true",
+        default=False,
+        help="Push to HuggingFace: raw output → preprocessed repo, then clean output → postprocessed repo. Requires HF_TOKEN.",
+    )
     args = parser.parse_args()
     lite = not args.full
 
     from src.config import JOBS_FULL_JSONL_FILE, JOBS_LITE_JSONL_FILE
+    from src.data_ingestion.hub import HF_REPO_FULL, HF_REPO_FULL_POST, HF_REPO_LITE, HF_REPO_LITE_POST, push_to_hub
     from src.data_ingestion.loader import load_raw_jobs
+    from src.data_ingestion.postprocess import postprocess_df
 
     if lite:
-        # DS only — reads DataScientist.csv
         df = load_raw_jobs(da_path=False)
         output_path = JOBS_LITE_JSONL_FILE
+        hf_repo_pre = HF_REPO_LITE
+        hf_repo_post = HF_REPO_LITE_POST
         print(f"Mode: lite | {len(df)} DS rows → {output_path}")
     else:
-        # Full — reads DataScientist.csv + DataAnalyst.csv
         df = load_raw_jobs()
         output_path = JOBS_FULL_JSONL_FILE
+        hf_repo_pre = HF_REPO_FULL
+        hf_repo_post = HF_REPO_FULL_POST
         print(f"Mode: full | {len(df)} rows ({df['source'].value_counts().to_dict()}) → {output_path}")
 
-    asyncio.run(run_pipeline(df, output_path=output_path))
+    results_df = asyncio.run(run_pipeline(df, output_path=output_path))
+
+    if args.push:
+        print("\nStep 1/2 — Pushing raw output to HuggingFace (preprocessed) ...")
+        push_to_hub(results_df, repo_id=hf_repo_pre, strip_scaffolding=False)
+
+        print("\nStep 2/2 — Applying postprocessing and pushing to HuggingFace (postprocessed) ...")
+        clean_df = postprocess_df(results_df)
+        push_to_hub(clean_df, repo_id=hf_repo_post, strip_scaffolding=True)

@@ -5,7 +5,7 @@ Push/pull the extracted Job records as a versioned Parquet dataset.
 
 Why Parquet (via datasets library) over raw JSONL:
   - Columnar and compressed — ~5x smaller than JSONL at this row count
-  - Native Arrow list types handle skills_technical, key_responsibilities etc.
+  - Native Arrow list types handle skills_required, skills_preferred, key_responsibilities etc.
     without any manual JSON serialisation/deserialisation
   - to_pandas() round-trips perfectly — no post-processing needed
   - Auto-generated dataset card with schema on the Hub
@@ -32,9 +32,8 @@ HF_REPO_FULL_POST = "Alejandrofupi/ai-jie-jobs-full-postprocessed"  # DS + DA  �
 # Columns added by the pipeline runner — never useful to dataset consumers.
 _META_COLS = {"_row_id", "prompt_version"}
 
-# Chain-of-thought scaffolding fields — kept in the preprocessed push so that
-# batch_postprocess can read responsibility_skills_found and apply the exclusion
-# rule.  Stripped from the postprocessed push (clean consumer-ready dataset).
+# Chain-of-thought scaffolding fields — kept in the preprocessed push for
+# inspection and debugging. Stripped from the postprocessed push (clean consumer-ready dataset).
 _SCAFFOLDING_COLS = {"responsibility_skills_found", "preferred_signals_found", "all_technical_skills"}
 
 
@@ -53,9 +52,8 @@ def push_to_hub(
         private:          Create as a private repo (default False).
         strip_scaffolding: If True, also drop the chain-of-thought scaffolding fields
                           (responsibility_skills_found, preferred_signals_found,
-                          all_technical_skills).  Use False (default) for the
-                          preprocessed push so that batch_postprocess can apply the
-                          responsibility-exclusion rule from HF.  Use True for the
+                          all_technical_skills). Use False for the preprocessed push
+                          (raw output preserved for inspection). Use True for the
                           postprocessed push (clean consumer-ready dataset).
     """
     from datasets import Dataset
@@ -77,8 +75,8 @@ def load_from_hub(repo_id: str = HF_REPO_LITE) -> pd.DataFrame:
     Load the processed jobs dataset from HuggingFace Hub as a DataFrame.
 
     Returns the full dataset (split="train" — HF default for single-split datasets).
-    List-typed columns (skills_technical, key_responsibilities, etc.) are returned
-    as Python lists, matching the original Job model structure.
+    List-typed columns (skills_required, skills_preferred, key_responsibilities, etc.)
+    are returned as Python lists, matching the original Job model structure.
     """
     from datasets import load_dataset
 

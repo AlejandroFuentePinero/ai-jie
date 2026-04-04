@@ -307,8 +307,12 @@ def _get_async_client():
 def _get_sync_client():
     global _sync_client
     if _sync_client is None:
-        _sync_client = instructor.from_openai(OpenAI())
+        _sync_client = instructor.from_openai(OpenAI(max_retries=6))
     return _sync_client
+
+
+def _build_user_message(job_title: str, job_description: str, location: str) -> str:
+    return f"Job Title: {job_title}\n\nJob Description:\n{job_description}\n\nLocation:\n{location}"
 
 
 async def parse_posting_async(
@@ -323,10 +327,7 @@ async def parse_posting_async(
         response_model=Job,
         messages=[
             {"role": "system", "content": SYSTEM_PROMPT},
-            {
-                "role": "user",
-                "content": f"Job Title: {job_title}\n\nJob Description:\n{job_description}\n\nLocation:\n{location}",
-            },
+            {"role": "user", "content": _build_user_message(job_title, job_description, location)},
         ],
         max_retries=2,
         temperature=0,
@@ -348,10 +349,7 @@ def parse_posting(
         response_model=Job,
         messages=[
             {"role": "system", "content": SYSTEM_PROMPT},
-            {
-                "role": "user",
-                "content": f"Job Title: {job_title}\n\nJob Description:\n{job_description}\n\nLocation:\n{location}",
-            },
+            {"role": "user", "content": _build_user_message(job_title, job_description, location)},
         ],
         max_retries=2,
         temperature=0,

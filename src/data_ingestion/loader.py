@@ -71,7 +71,7 @@ def load_raw_jobs(
 
     if skip_da:
         ds["source"] = "ds"
-        df = pd.concat([ds], ignore_index=True)
+        df = ds
     else:
         da = pd.read_csv(da_path).drop(columns=_DROP_COLS, errors="ignore")
         # Compute common columns before adding source to either frame

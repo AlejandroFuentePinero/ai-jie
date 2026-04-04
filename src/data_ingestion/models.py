@@ -135,21 +135,59 @@ class Job(BaseModel):
     )
 
 
+# ── Judge Schema ──────────────────────────────────────────────
+
+
 class EvaluationScore(BaseModel):
+    # --- Judge scaffolding (chain-of-thought) ---
+    skills_i_consider_required: Optional[list[str]] = Field(
+        None,
+        description=(
+            "FILL FIRST. Read the posting and list every technical skill "
+            "YOU judge to be required. This is your ground truth for "
+            "scoring skills_required_accuracy."
+        ),
+    )
+    skills_i_consider_preferred: Optional[list[str]] = Field(
+        None,
+        description=(
+            "FILL SECOND. Read the posting and list every technical skill "
+            "YOU judge to be preferred/optional. This is your ground truth "
+            "for scoring skills_preferred_accuracy. Null if none."
+        ),
+    )
+    skills_i_consider_soft: Optional[list[str]] = Field(
+        None,
+        description=(
+            "FILL THIRD. Read the posting and list every soft/interpersonal "
+            "skill YOU judge to be genuinely emphasised. This is your ground "
+            "truth for scoring skills_soft_accuracy. Null if none."
+        ),
+    )
+    misclassified_skills: Optional[list[str]] = Field(
+        None,
+        description=(
+            "FILL FOURTH. List any skill that the extractor placed in the "
+            "wrong bucket — state the skill, where the extractor put it, "
+            "and where it should be. Null if no misclassifications."
+        ),
+    )
+
+    # --- Scores ---
     # Company
-    company_name_accuracy: int
-    company_description_accuracy: int
+    company_name_accuracy: int  # 1-3
+    company_description_accuracy: int  # 1-3
     # Role
-    seniority_accuracy: int
-    job_family_accuracy: int
-    years_experience_accuracy: int
-    education_accuracy: int
-    responsibilities_quality: int
+    seniority_accuracy: int  # 1-3
+    job_family_accuracy: int  # 1-3
+    years_experience_accuracy: int  # 1-3
+    education_accuracy: int  # 1-3
+    responsibilities_quality: int  # 1-3
     # Skills
-    skills_required_accuracy: int
-    skills_preferred_accuracy: int
-    skills_soft_accuracy: int
+    skills_required_accuracy: int  # 1-3
+    skills_preferred_accuracy: int  # 1-3
+    skills_soft_accuracy: int  # 1-3
     # Overall
-    null_appropriateness: int
-    overall: int
+    null_appropriateness: int  # 1-3
+    overall: int  # 1-3
     flags: list[str]
