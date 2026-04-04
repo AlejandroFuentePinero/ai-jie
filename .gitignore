@@ -29,5 +29,5 @@ CLAUDE.md
 # macOS
 .DS_Store
 
-# Experiments
-tests/
+# Scratch / informal experiments (not version controlled)
+scratch/

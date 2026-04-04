@@ -7,3 +7,4 @@ nest-asyncio
 datasets
 huggingface_hub
 matplotlib
+pytest
