@@ -37,10 +37,13 @@ raw CSVs → loader.py (unify, clean) → pipeline.py (async extraction) → job
 | `src/data_ingestion/loader.py` | Unified CSV loader — concat, -1→NaN, common columns, clean index |
 | `src/data_ingestion/pipeline.py` | Batch runner — lite/full modes, semaphore concurrency, checkpoint/resume |
 | `src/data_ingestion/hub.py` | HuggingFace Hub push/pull — separate lite/full repos, public |
-| `src/evals/judge.py` | LLM-as-a-Judge — `gpt-4o`, `instructor`, 17-dimension scoring |
-| `src/evals/runner.py` | Eval orchestrator — sample, extract, judge, save |
+| `src/data_ingestion/postprocess.py` | Deterministic cleanup — responsibility exclusion, skill blocklist |
+| `src/evals/judge.py` | LLM-as-a-Judge — `gpt-5.4-mini`, `instructor`, 12-dimension scoring |
+| `src/evals/runner.py` | Eval orchestrator — sample, extract, postprocess, judge, save |
 | `src/evals/report.py` | Score aggregation, group summaries, report persistence |
-| `src/evals/human_eval.py` | Human scoring — same 17-dimension schema as judge; `compare()` for calibration |
+| `src/evals/eval_trend.py` | Reads all report.json files, writes trend.csv + trajectory plots |
+| `src/evals/human_eval.py` | Human scoring — same 12-dimension schema as judge |
+| `tests/test_postprocess.py` | Unit tests for deterministic postprocessing rules |
 
 ---
 
@@ -63,9 +66,9 @@ raw CSVs → loader.py (unify, clean) → pipeline.py (async extraction) → job
 
 ### 3.3 Async pipeline with semaphore rate limiting
 
-**Decision**: `asyncio.Semaphore(concurrency=20)` for extraction; `concurrency=3` for eval (judge uses gpt-4o which has tighter limits).
+**Decision**: `asyncio.Semaphore(concurrency=20)` for extraction; `concurrency=3` for eval (conservative for Tier 1 shared quota).
 
-**Justification**: Sequential processing of 3,000–4,000 records would take hours. Concurrency brings this down to minutes. The semaphore prevents hitting OpenAI rate limits (429s were encountered at higher concurrency with gpt-4o).
+**Justification**: Sequential processing of 3,000–4,000 records would take hours. Concurrency brings this down to minutes. The semaphore prevents hitting OpenAI rate limits (429s were encountered at higher concurrency in early testing).
 
 ### 3.4 JSONL checkpoint/resume
 
@@ -110,22 +113,24 @@ All other fields are extracted. Key design choices:
 - `seniority: Seniority` — enum enforced at validation; `unknown` is a valid value, not an error
 - `job_family: JobFamily` — assigned from primary responsibilities, not job title
 - `years_experience_min / max: Optional[float]` — only if explicitly stated; never inferred
-- `skills_technical: Optional[list[str]]` — includes ALL named tools, categories (cloud computing, BI tools), and methodology terms (machine learning, NLP, A/B testing)
-- `salary_min / max: Optional[float]` — only if stated as a number; never inferred from seniority
+- `skills_required / skills_preferred / skills_soft: Optional[list[str]]` — three-way classification enforced by chain-of-thought scaffolding and postprocessing
+- Chain-of-thought scaffolding fields (filled before skill classification, stripped from postprocessed dataset):
+  - `responsibility_skills_found` — model lists all skill tokens embedded in responsibility statements
+  - `preferred_signals_found` — model lists all optionality phrases detected
+  - `all_technical_skills` — model lists all technical skills found anywhere in the posting
 
 ### `EvaluationScore` model (judge output)
 
-17 integer dimensions (1–3 scale) across five groups, plus `flags: list[str]`:
+12 integer dimensions (1–3 scale) across four groups, plus `flags: list[str]`:
 
 | Group | Dimensions |
 |-------|------------|
-| Company | name, description, industry, remote_policy, employment_type |
-| Role | seniority, job_family, years_experience, education, responsibilities |
-| Skills | technical_precision, technical_recall, soft, nice_to_have |
-| Compensation | salary |
+| Company | company_name_accuracy, company_description_accuracy |
+| Role | seniority_accuracy, job_family_accuracy, years_experience_accuracy, education_accuracy, responsibilities_quality |
+| Skills | skills_required_accuracy, skills_preferred_accuracy, skills_soft_accuracy |
 | Overall | null_appropriateness, overall |
 
-`location_accuracy` was removed (see §5.2).
+`location_accuracy` removed (passthrough field — see §5.2). `industry_accuracy`, salary, remote_policy, employment_type removed in v28 (near-universal nulls, prompt cost with negligible signal). Old schema had 17 dimensions across 5 groups.
 
 ---
 
@@ -706,9 +711,17 @@ def postprocess(job: Job) -> Job:
 
 Called in both `pipeline.py` and `runner.py` immediately after `parse_posting_async()` returns, before serialisation. The scaffolding field `responsibility_skills_found` provides exact ground truth — the model's own output is used to enforce the rule it missed.
 
+#### Second component — implemented (v32)
+
+The skill blocklist (`_SKILL_BLOCKLIST` in `postprocess.py`) is a growing set of tokens that consistently appear as false-positive skills across multiple jobs: broad field labels ("analytics"), generic nouns, and interpersonal soft skills that the model incorrectly routes to `skills_required` or `skills_preferred`. Applied via `_remove_blocked()` to both fields after the responsibility exclusion step.
+
+The set is seeded from patterns identified during human evaluation and prompt iteration. It is intentionally conservative — only tokens confirmed as false-positives across multiple jobs are added. The full batch run will surface the token distribution at scale, which will drive targeted expansions.
+
+16 unit tests covering both implemented components are in `tests/test_postprocess.py` (all passing as of 2026-04-04).
+
 #### Remaining components — data-driven, post-batch
 
-The remaining filters (normalisation map, activity token blocklist, soft skill responsibility filter) must be built from the full batch token distribution, not from a handful of test cases. Run first, analyse the aggregated skill token distribution, then build targeted filters for the patterns that appear at scale.
+The remaining filters (normalisation map, slash-token splitter, soft skill responsibility filter) must be built from the full batch token distribution, not from a handful of test cases. Run first, analyse the aggregated skill token distribution, then build targeted filters for the patterns that appear at scale.
 
 ---
 
@@ -732,11 +745,15 @@ The remaining filters (normalisation map, activity token blocklist, soft skill r
 - [x] **v25–v26 patch attempts** — v25 targeted modifier/deduplication fixes; v26 added decision-tree structure without skill definition gate. Both superseded by v27 architectural redesign. See §9.12.
 - [x] **v28–v31 architectural redesign and refinement** — schema-enforced chain-of-thought via two scaffolding fields (`responsibility_skills_found`, `preferred_signals_found`); prompt simplified from ~250 to ~60 lines; salary/remote/employment fields removed; preferred-first field ordering confirmed. See §9.13.
 - [x] **v31 locked as batch prompt** — preferred-first field ordering confirmed (blast radius asymmetry); v29–v30 micro-refinements applied; post-processing layer design documented. Human eval of v31 in progress.
-- [ ] **Human eval of v31 extractions** — validate final locked prompt before batch. Run dir: `eval_results/20260402_061928_v31`.
+- [x] **Human eval of v31 extractions completed** — validated final locked prompt before batch. Run dir: `eval_results/20260402_061928_v31`.
 - [ ] `industry_accuracy` (~2.66) is the weakest remaining dimension. **Architectural fix deferred**: a company enrichment agent (web search / company page lookup) will supply ground-truth sector context at the recommendation step, rather than inferring from recruiter-written job descriptions. No further prompt iteration planned.
-- [ ] Run full pipeline on all ~3,892 DS records (lite mode, `python -m src.data_ingestion.pipeline`). **Prompt locked pending manual eval confirmation.**
+- [ ] Run full pipeline on all ~3,892 DS records (lite mode, `python -m src.data_ingestion.pipeline`). **Prompt locked.**
 - [x] **Post-processing layer — first component implemented** — `src/data_ingestion/postprocess.py`: responsibility exclusion fix (skills found in `responsibility_skills_found` removed from `skills_preferred`, moved to `skills_required`). Called in `pipeline.py` and `runner.py` after extraction. See §9.14.
-- [ ] **Post-processing layer — remaining components** — normalisation map, slash-token splitter, activity token blocklist, soft skill responsibility filter. Data-driven — build from full batch token distribution after batch run.
+- [x] **Post-processing layer — second component implemented** — `_SKILL_BLOCKLIST` in `postprocess.py`: removes broad field labels, generic nouns, and soft skills from `skills_required` and `skills_preferred`. Seeded from human eval and prompt iteration findings. See §9.14.
+- [ ] **Post-processing layer — remaining components** — normalisation map, slash-token splitter, soft skill responsibility filter. Data-driven — build from full batch token distribution after batch run.
+- [x] **Codebase audit completed (2026-04-04)** — full review of all `src/` modules. Changes: `loader.py` no-op concat removed; `parser.py` `_build_user_message` helper + `max_retries=6` on sync client; `postprocess.py` duplicate blocklist entry removed; `pipeline.py` default `prompt_version` updated to `v32`; `judge.py` `_JUDGE_EXCLUDE` promoted to module-level frozenset + `sector` added; `runner.py` stale model reference fixed; `report.py` dead `TYPE_CHECKING` block removed; `eval_trend.py` local `DIMENSIONS`/`GROUPS` replaced with imports from `report.py`; `human_eval.py` `compare()` docstring traces removed + `sector` added to skip set.
+- [x] **Unit tests added (2026-04-04)** — 16 tests in `tests/test_postprocess.py` covering `apply_responsibility_exclusion`, `_remove_blocked`, and `postprocess()` / `postprocess_df()` consistency. All passing. Token normalisation tests deferred until post-batch token distribution is available.
+- [ ] **Token normalisation unit tests** — design and implement after full batch run surfaces the token distribution. Add to `tests/test_postprocess.py`.
 - [ ] This prompt is the ingestion pipeline for all future data — treat as stable unless a systematic extraction failure is identified through human audit.
 - [ ] Push lite dataset to HuggingFace Hub (`Alejandrofupi/ai-jie-jobs-lite`) after batch run.
 

@@ -8,7 +8,7 @@ An end-to-end pipeline for extracting, evaluating, and versioning structured dat
 
 AI-JIE takes raw job posting text and produces structured records — company, role, skills, and compensation — ready for downstream analysis. It includes a full evaluation framework using LLM-as-a-Judge to measure and iteratively improve extraction quality.
 
-**Stack**: Python · OpenAI (`gpt-5.4-mini` for extraction, `gpt-4o` for evaluation) · `instructor` · `asyncio` · HuggingFace Hub · Pydantic
+**Stack**: Python · OpenAI (`gpt-5.4-mini` for extraction and evaluation) · `instructor` · `asyncio` · HuggingFace Hub · Pydantic · `pytest`
 
 ---
 
@@ -16,7 +16,7 @@ AI-JIE takes raw job posting text and produces structured records — company, r
 
 - Async batch extraction with rate-limit-safe concurrency and checkpoint/resume
 - Structured output via `instructor` — Pydantic validation + automatic retries
-- LLM-as-a-Judge evaluation across 17 dimensions with version tracking
+- LLM-as-a-Judge evaluation across 12 dimensions with version tracking
 - HuggingFace Hub integration — push and pull the processed dataset as Parquet
 - Full eval results saved per run: metadata, prompt snapshot, scores, flags, report
 
@@ -30,23 +30,24 @@ ai-jie/
 │   ├── config.py                    # Paths and constants
 │   ├── data_ingestion/
 │   │   ├── models.py                # Pydantic schemas (Job, EvaluationScore)
-│   │   ├── parser.py                # LLM extraction (gpt-4o-mini, instructor)
-│   │   ├── pipeline.py              # Async batch runner with checkpoint/resume (lite/full modes)
 │   │   ├── loader.py                # Unified CSV loader — concat, -1→NaN, clean index
-│   │   └── hub.py                   # HuggingFace Hub push/pull (lite + full repos)
+│   │   ├── parser.py                # LLM extraction (gpt-5.4-mini, instructor)
+│   │   ├── postprocess.py           # Deterministic cleanup — responsibility exclusion, blocklist
+│   │   ├── pipeline.py              # Async batch runner with checkpoint/resume (lite/full modes)
+│   │   └── hub.py                   # HuggingFace Hub push/pull (preprocessed + postprocessed repos)
 │   └── evals/
-│       ├── judge.py                 # LLM-as-a-Judge (gpt-4o, instructor)
-│       ├── runner.py                # Eval orchestrator
+│       ├── judge.py                 # LLM-as-a-Judge (gpt-5.4-mini, instructor)
+│       ├── runner.py                # Eval orchestrator — extract, postprocess, judge, report
 │       ├── report.py                # Score aggregation, group summaries, report persistence
 │       ├── eval_trend.py            # Reads all report.json files, writes trend.csv + plots
-│       └── human_eval.py            # Human scoring — same schema as judge, compare() for calibration check
+│       └── human_eval.py            # Human scoring — same schema as judge
+├── tests/
+│   └── test_postprocess.py          # Unit tests for deterministic postprocessing rules
+├── scratch/                         # Local playground — not version controlled
 ├── data/
 │   ├── raw/                         # Source CSVs (not committed); jobs_unified.csv
 │   └── processed/                   # jobs_lite.jsonl (DS only), jobs_full.jsonl (DS+DA)
 ├── eval_results/                    # Per-run eval output
-├── tests/
-│   ├── test_industry_extraction.py  # Ground-truth industry accuracy test (Glassdoor labels)
-│   └── ground_truth_annotation/     # Annotation framework (deferred — see technical report §9)
 ├── docs/
 │   └── technical_report.md          # Design decisions and version history
 └── requirements.txt
@@ -121,11 +122,11 @@ push_to_hub(results_df, repo_id=HF_REPO_FULL)        # preprocessed full repo
 df = load_from_hub()                                 # pulls preprocessed lite dataset
 ```
 
-Then run batch postprocessing to produce the clean consumer-ready dataset:
+Use `--push` with the pipeline CLI to apply postprocessing and push both repos in one step:
 
 ```bash
-python -m src.data_ingestion.batch_postprocess        # lite → ai-jie-jobs-lite-postprocessed
-python -m src.data_ingestion.batch_postprocess --full  # full → ai-jie-jobs-full-postprocessed
+python -m src.data_ingestion.pipeline --push        # DS only
+python -m src.data_ingestion.pipeline --full --push # DS + DA
 ```
 
 ### Run evaluation
@@ -167,33 +168,34 @@ figs["overview"]
 
 Each job posting is parsed into the following structure:
 
-**Company**: `company_name`, `company_description`, `remote_policy`, `employment_type`
+**Company**: `company_name`, `company_description` (always null — compliance check)
 
-**Role**: `title`, `seniority`, `job_family`, `location`, `years_experience_min/max`, `key_responsibilities`, `education_required`
+**Role**: `seniority`, `job_family`, `years_experience_min/max`, `key_responsibilities`, `education_required`
 
 **Skills**: `skills_required`, `skills_preferred`, `skills_soft`
 
-**Compensation**: `salary_min`, `salary_max`, `salary_currency`, `salary_period`
+**Chain-of-thought scaffolding** (in preprocessed dataset, stripped from postprocessed):
+`responsibility_skills_found` → `preferred_signals_found` → `all_technical_skills`
 
 Key rules enforced by the extraction prompt:
 - `seniority` follows a strict priority ladder: explicit title keyword → years of experience → scope of responsibilities → `"unknown"`. Title rank words (Senior, Lead, Manager, Director, VP) always take priority with no override.
-- `job_family` is title-first: a clear title keyword always overrides responsibilities-based inference. Exception: "Data Scientist" is always treated as ambiguous — primary responsibilities decide.
-- `skills_required` is exhaustive: includes precise tool tokens (Python, Spark, SQL), domain expertise areas (investment finance, security analytics), and tools named implicitly in responsibilities bullets. Hard boundary: soft/interpersonal skills never go here.
-- `skills_preferred` captures skills presented as optional or desirable using semantic judgment. Emphasis words like "strong" or "proficiency in" describe level, not optionality.
+- `job_family` is title-first: a clear title keyword always overrides responsibilities-based inference.
+- `skills_required` is exhaustive: all technical and domain skills not marked optional. Hard boundary: soft/interpersonal skills never go here.
+- `skills_preferred` captures only skills appearing in optionality zones (`preferred`, `nice to have`, `a plus`, etc.). Emphasis words like "strong" or "proficiency in" describe level, not optionality.
 - `skills_soft` covers interpersonal/organisational skills the employer genuinely emphasises, extracted as concise condensed phrases (2–7 words).
+- Postprocessing enforces the responsibility exclusion rule deterministically and removes blocklisted tokens — see `src/data_ingestion/postprocess.py`.
 
 ---
 
 ## Evaluation
 
-The LLM-as-a-Judge scores each extraction on 15 dimensions (1–3 scale) across five groups:
+The LLM-as-a-Judge scores each extraction on 12 dimensions (1–3 scale) across four groups:
 
 | Group | Dimensions |
 |-------|------------|
-| Company | company_name, company_description, remote_policy, employment_type |
-| Role | seniority, job_family, years_experience, education, responsibilities |
-| Skills | skills_required, skills_preferred, skills_soft |
-| Compensation | salary |
+| Company | company_name_accuracy, company_description_accuracy |
+| Role | seniority_accuracy, job_family_accuracy, years_experience_accuracy, education_accuracy, responsibilities_quality |
+| Skills | skills_required_accuracy, skills_preferred_accuracy, skills_soft_accuracy |
 | Overall | null_appropriateness, overall |
 
 Each eval run saves to `eval_results/<timestamp>_<version>/`:
@@ -211,11 +213,11 @@ After any new run, regenerate the trajectory plots:
 python -m src.evals.eval_trend
 ```
 
-### Current prompt: v32 (human eval in progress before batch)
+### Current prompt: v32 (locked — batch pipeline pending)
 
 **Stage 1 canonical baseline**: v9g (seed=42, overall=2.98) — validated on three independent seeds.
 
-**Stage 2** (v16+) introduced a breaking schema change — `skills_technical`/`nice_to_have`/`industry` replaced by `skills_required`/`skills_preferred`/`skills_soft` — making v1–v15 scores non-comparable. v21 is the best judge-scored result in stage 2. v31 is the locked batch prompt — see [`docs/technical_report.md §9.13`](docs/technical_report.md) for full details.
+**Stage 2** (v16+) introduced a breaking schema change — `skills_technical`/`nice_to_have`/`industry` replaced by `skills_required`/`skills_preferred`/`skills_soft` — making v1–v15 scores non-comparable. v21 is the best judge-scored result through v22; v28–v32 introduced architectural improvements (schema chain-of-thought, deterministic postprocessing) that supersede judge scores as a quality signal. **v32 is the locked batch prompt** — see [`docs/technical_report.md §9.13`](docs/technical_report.md) for full details.
 
 Stage 2 trajectory (seed=42, n=50):
 
@@ -247,44 +249,55 @@ See [`docs/technical_report.md`](docs/technical_report.md) for the full version 
 
 ![Eval trend overview](docs/figures/trend_overview.png)
 
-**Score by group (company, role, skills, compensation, overall):**
+**Score by group (company, role, skills, overall):**
 
 ![Eval trend by group](docs/figures/trend_by_group.png)
 
-**All 17 dimensions (heatmap):**
+**All 12 dimensions (heatmap):**
 
 ![Eval trend all fields](docs/figures/trend_all_fields.png)
 
 ### Human evaluation
 
-Score extractions yourself using the same 17-dimension schema as the judge. Produces `human_scores.jsonl` alongside `scores.jsonl` so the two can be compared row by row — both as an independent extraction quality signal and as a judge calibration check.
+Score extractions yourself using the same 12-dimension schema as the judge. Produces `human_scores.jsonl` in the same run directory, keyed on `_row_id`.
 
 ```python
 from src.evals.human_eval import load_run
 
-session = load_run("v9g")   # loads latest run matching that version
+session = load_run("v32")   # loads latest run matching that version
 session.status()            # progress: N/50 scored
 
 session.show_description(ROW_ID)   # original posting
-session.show_extraction(ROW_ID)    # extracted fields
+session.show_extraction(ROW_ID)    # extracted fields + scaffolding debug sections
 
 session.score(
     ROW_ID,
     company_name_accuracy=3, company_description_accuracy=3,
-    remote_policy_accuracy=3, employment_type_accuracy=3,
     seniority_accuracy=3, job_family_accuracy=3, years_experience_accuracy=3,
     education_accuracy=3, responsibilities_quality=3,
     skills_required_accuracy=2, skills_preferred_accuracy=3, skills_soft_accuracy=3,
-    salary_accuracy=3, null_appropriateness=3, overall=2,
+    null_appropriateness=3, overall=2,
     flags=["skills hidden in responsibilities not extracted"],
 )
-
-session.compare()   # mean delta and top disagreements: human − judge per dimension
 ```
 
-See [`notebooks/human_eval/human_eval.ipynb`](notebooks/human_eval/human_eval.ipynb) for the guided review workflow.
-
 See [`docs/technical_report.md`](docs/technical_report.md) for full version history, design decisions, and the v10 Glassdoor hint experiment.
+
+---
+
+## Testing
+
+Unit tests cover the deterministic postprocessing layer — the safety net for LLM extraction output:
+
+```bash
+python -m pytest tests/ -v
+```
+
+| Test file | What it covers |
+|---|---|
+| `tests/test_postprocess.py` | `apply_responsibility_exclusion`, `_remove_blocked`, consistency between `postprocess()` and `postprocess_df()` |
+
+Token normalisation tests will be added alongside that step once the full batch run surfaces the token distribution. See `docs/technical_report.md §9.14`.
 
 ---
 
