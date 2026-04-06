@@ -161,6 +161,16 @@ if __name__ == "__main__":
         default=False,
         help="Push to HuggingFace: raw output → preprocessed repo, then clean output → postprocessed repo. Requires HF_TOKEN.",
     )
+    parser.add_argument(
+        "--postprocess",
+        action="store_true",
+        default=False,
+        help=(
+            "Skip extraction. Load the local JSONL checkpoint, apply postprocess_df(), "
+            "and push to the postprocessed HF repo. Use after inspecting preprocessed output "
+            "and updating blocklists/normalisation in postprocess.py. Requires HF_TOKEN."
+        ),
+    )
     args = parser.parse_args()
     lite = not args.full
 
@@ -170,16 +180,33 @@ if __name__ == "__main__":
     from src.data_ingestion.postprocess import postprocess_df
 
     if lite:
-        df = load_raw_jobs(da_path=False)
         output_path = JOBS_LITE_JSONL_FILE
         hf_repo_pre = HF_REPO_LITE
         hf_repo_post = HF_REPO_LITE_POST
-        print(f"Mode: lite | {len(df)} DS rows → {output_path}")
     else:
-        df = load_raw_jobs()
         output_path = JOBS_FULL_JSONL_FILE
         hf_repo_pre = HF_REPO_FULL
         hf_repo_post = HF_REPO_FULL_POST
+
+    # --postprocess: skip extraction, operate on the existing local checkpoint only.
+    if args.postprocess:
+        print(f"Mode: postprocess-only | Loading checkpoint from {output_path}")
+        results_df = _load_results(output_path)
+        if results_df.empty:
+            print("ERROR: No checkpoint found. Run extraction first (without --postprocess).")
+            sys.exit(1)
+        print(f"Loaded {len(results_df)} records.")
+        print("\nApplying postprocessing and pushing to HuggingFace (postprocessed) ...")
+        clean_df = postprocess_df(results_df)
+        push_to_hub(clean_df, repo_id=hf_repo_post, strip_scaffolding=True)
+        sys.exit(0)
+
+    # Normal extraction path.
+    if lite:
+        df = load_raw_jobs(da_path=False)
+        print(f"Mode: lite | {len(df)} DS rows → {output_path}")
+    else:
+        df = load_raw_jobs()
         print(f"Mode: full | {len(df)} rows ({df['source'].value_counts().to_dict()}) → {output_path}")
 
     results_df = asyncio.run(run_pipeline(df, output_path=output_path))

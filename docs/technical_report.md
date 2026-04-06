@@ -723,6 +723,50 @@ The set is seeded from patterns identified during human evaluation and prompt it
 
 The remaining filters (normalisation map, slash-token splitter, soft skill responsibility filter) must be built from the full batch token distribution, not from a handful of test cases. Run first, analyse the aggregated skill token distribution, then build targeted filters for the patterns that appear at scale.
 
+### 9.15 v32 human eval → v32b / v32c / v33 — responsibility scanning refinement arc (2026-04-06)
+
+#### Problem identified: discipline label leakage into skills_required
+
+A 28-posting human evaluation of v32 extractions (seed=42) identified a systematic failure: discipline names, field labels, and broad category terms from the responsibilities section were leaking into `skills_required`. The `responsibility_skills_found` scaffolding field was capturing tokens like `machine learning`, `data science`, `software engineering`, `computer science`, `analytics`, `optimization`, `testing`, `research` from responsibility bullets — activity context terms, not candidate competencies — and because responsibility-embedded skills receive a required-by-default override in the pipeline logic, these terms were being locked into `skills_required` regardless of how they appeared elsewhere in the posting.
+
+18 of 28 reviewed rows had `skills_required_accuracy ≤ 4` (5-point human scale), with flags consistently pointing to this noise pattern. The postprocessing blocklist was partially mitigating it but the blocklist is intentionally conservative and cannot cover the long tail of domain-specific field labels that appear across thousands of postings.
+
+#### v32b — first surgical fix
+
+**Change**: Tightened the `responsibility_skills_found` instruction in both `parser.py` system prompt and the `models.py` `Field(description=...)` to explicitly exclude discipline names, field labels, and broad category terms.
+
+**Added rule**: "Do NOT extract discipline names, field labels, or data descriptors from responsibilities — in responsibilities, these describe the work context, not a screenable candidate competency. Domain expertise enters the pipeline through `all_technical_skills` via requirements and qualifications sections."
+
+**Result (Opus 4.6 head-to-head review, all 50 rows)**: Noise labels eliminated across standard data science and engineering roles. Downstream effect: the preferred/required partition improved as a secondary consequence — skills that v32 was incorrectly locking into required via the responsibility override now flowed correctly to preferred when optionality language was present.
+
+**Regression identified**: Domain-heavy and biological roles regressed. The instruction was too restrictive — it prevented extraction of genuine specific techniques from responsibilities (e.g. `qPCR`, `flow cytometry`, `microCT`, `bioluminescence` from wet-lab biology roles; `Monte Carlo simulation`, `portfolio attribution` from quantitative finance roles). These are CV-worthy specific techniques, not field labels, but the tightened instruction caused the model to suppress them.
+
+#### v32c — second surgical fix
+
+**Change**: Extended the `responsibility_skills_found` instruction to explicitly enumerate technique types that should be extracted, alongside the exclusion of field labels.
+
+**Added examples**: "specific techniques or methods (e.g. qPCR, flow cytometry, Monte Carlo simulation, portfolio attribution)" added to the inclusion list. The exclusion criterion was sharpened with a distinguishing test: "if a term names an entire field or degree programme rather than a specific learnable technique, it is context, not a skill."
+
+**Result (Opus 4.6 head-to-head review, all 50 rows)**: Noise problem resolved across the full sample. v32c systematically eliminates the discipline labels that were flagged in the 28-posting manual eval while correctly capturing domain-specific techniques from biological and quantitative roles. Downstream preferred/required partition improvement from v32b preserved.
+
+**Residual**: A small number of data-type descriptors and degree field labels leaked through the requirements/qualifications scan into `all_technical_skills` (rows 7, 29, 37). Separate issue — affects a different pipeline stage (`all_technical_skills` via requirements, not `responsibility_skills_found`) and is lower severity. Does not block batch production.
+
+**Recommendation from Opus 4.6**: Go to batch. The extraction target — noise discipline labels in `skills_required` — is resolved across the full 50-sample eval. The residual requirements-side noise is minor, does not affect the majority of postings, and requires a different fix. Holding batch to chase it is optimising for diminishing returns.
+
+#### v33 — section boundary guard (final pre-batch refinement)
+
+A follow-up Opus 4.6 review of the first 10 postings (row_ids 0–9) evaluated the full extraction pipeline, not just skill extraction. Overall assessment: production-ready.
+
+**One structural failure identified**: Row 6 — a posting without clear section headers separating duties from qualifications. The model was scanning qualification statements as responsibilities because both appeared in the same prose block. Specific skills stated as requirements ("the candidate should have") were being extracted into `responsibility_skills_found` instead of reaching `all_technical_skills` via the qualifications path.
+
+**Opus recommendation**: "If the posting lacks clear section headers, only treat sentences describing day-to-day activities as responsibilities — not sentences stating what the candidate should have." Flagged as a refinement, not a blocker.
+
+**Change applied**: Added the section-boundary guard to both `parser.py` system prompt and `models.py` Field description:
+
+> "If the posting lacks clear section headers separating duties from qualifications, only treat sentences describing day-to-day activities as responsibilities — not sentences stating what the candidate should have, know, or bring."
+
+**v33 is the locked batch prompt.** Extraction-only run (seed=42, n=50) confirmed clean. `opus4.6_eval.md` with full description + extraction for rows 0–9 saved to `eval_results/{timestamp}_v33/`.
+
 ---
 
 ## 10. Outstanding Issues / Next Steps
@@ -753,8 +797,11 @@ The remaining filters (normalisation map, slash-token splitter, soft skill respo
 - [ ] **Post-processing layer — remaining components** — normalisation map, slash-token splitter, soft skill responsibility filter. Data-driven — build from full batch token distribution after batch run.
 - [x] **Codebase audit completed (2026-04-04)** — full review of all `src/` modules. Changes: `loader.py` no-op concat removed; `parser.py` `_build_user_message` helper + `max_retries=6` on sync client; `postprocess.py` duplicate blocklist entry removed; `pipeline.py` default `prompt_version` updated to `v32`; `judge.py` `_JUDGE_EXCLUDE` promoted to module-level frozenset + `sector` added; `runner.py` stale model reference fixed; `report.py` dead `TYPE_CHECKING` block removed; `eval_trend.py` local `DIMENSIONS`/`GROUPS` replaced with imports from `report.py`; `human_eval.py` `compare()` docstring traces removed + `sector` added to skip set.
 - [x] **Unit tests added (2026-04-04)** — 16 tests in `tests/test_postprocess.py` covering `apply_responsibility_exclusion`, `_remove_blocked`, and `postprocess()` / `postprocess_df()` consistency. All passing. Token normalisation tests deferred until post-batch token distribution is available.
+- [x] **28-posting human eval of v32 (2026-04-06)** — systematic noise identified: discipline labels leaking from `responsibility_skills_found` into `skills_required`. 18/28 rows had `skills_required_accuracy ≤ 4`. Three surgical prompt fixes applied across v32b, v32c, v33. See §9.15.
+- [x] **v32b–v33 responsibility scanning refinement (2026-04-06)** — three-version arc resolved discipline label noise while preserving domain-specific technique extraction for biological/quantitative roles. Opus 4.6 review of all 50 rows confirmed noise resolved in v32c. v33 adds section-boundary guard for ambiguous postings. See §9.15.
+- [x] **v33 locked as batch prompt (2026-04-06)** — Opus 4.6 confirmed production-ready on both full 50-sample diff review and 10-posting full-pipeline evaluation. `opus4.6_eval.md` (rows 0–9) saved in v33 run directory.
 - [ ] **Token normalisation unit tests** — design and implement after full batch run surfaces the token distribution. Add to `tests/test_postprocess.py`.
-- [ ] This prompt is the ingestion pipeline for all future data — treat as stable unless a systematic extraction failure is identified through human audit.
+- [ ] Run full pipeline on all ~3,892 DS records (`python -m src.data_ingestion.pipeline`). **Prompt locked at v33.**
 - [ ] Push lite dataset to HuggingFace Hub (`Alejandrofupi/ai-jie-jobs-lite`) after batch run.
 
 ---

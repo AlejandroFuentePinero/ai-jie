@@ -84,11 +84,16 @@ class Job(BaseModel):
     responsibility_skills_found: Optional[list[str]] = Field(
         None,
         description=(
-            "FILL FIRST. Scan ONLY responsibility/duties statements — "
-            "what the person will do in this role. List named tools, "
-            "technologies, programming languages, methodologies, or domain skills. "
-            "Do NOT scan requirements, qualifications, or preferred sections. "
-            "Skill tokens only, not sentences."
+            "FILL FIRST. Scan ONLY responsibility/duties statements. "
+            "Extract named tools, technologies, platforms, frameworks, "
+            "libraries, programming languages, named methodologies, and "
+            "specific techniques or methods. Do NOT extract discipline "
+            "names, field labels, or broad category terms — if a term "
+            "names an entire field or degree programme rather than a "
+            "specific learnable technique, it is context, not a skill. "
+            "If sections are not clearly separated, only treat sentences "
+            "describing day-to-day activities as responsibilities, not "
+            "sentences stating what the candidate should have or know."
         ),
     )
     preferred_signals_found: Optional[list[str]] = Field(

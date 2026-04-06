@@ -252,10 +252,19 @@ engineering teams") is a technical skill.
 
 **responsibility_skills_found** — scan ONLY the responsibilities or
 duties section of the posting — the sentences or bullets describing what
-the person will do in this role. List any specific tool, technology,
-language, methodology, or domain skill named there. Do NOT scan
-requirements, qualifications, preferred sections, or technology reference
-lists. Extract only the skill tokens, not the sentences.
+the person will do in this role. Extract named tools, technologies,
+platforms, frameworks, libraries, programming languages, named
+methodologies, and specific techniques or methods (e.g. qPCR, flow
+cytometry, Monte Carlo simulation, portfolio attribution). Do NOT
+extract discipline names, field labels, or broad category terms from
+this section — if a term names an entire field or degree programme
+rather than a specific learnable technique, it is context, not a skill.
+Do NOT scan requirements, qualifications, preferred sections, or
+technology reference lists. Extract only the skill tokens, not the
+sentences. If the posting lacks clear section headers separating duties from
+qualifications, only treat sentences describing day-to-day activities
+as responsibilities — not sentences stating what the candidate should
+have, know, or bring.
 
 **preferred_signals_found** — find every instance of optionality language
 in the posting. Copy the FULL sentence containing the signal — the
@@ -327,7 +336,10 @@ async def parse_posting_async(
         response_model=Job,
         messages=[
             {"role": "system", "content": SYSTEM_PROMPT},
-            {"role": "user", "content": _build_user_message(job_title, job_description, location)},
+            {
+                "role": "user",
+                "content": _build_user_message(job_title, job_description, location),
+            },
         ],
         max_retries=2,
         temperature=0,
@@ -349,7 +361,10 @@ def parse_posting(
         response_model=Job,
         messages=[
             {"role": "system", "content": SYSTEM_PROMPT},
-            {"role": "user", "content": _build_user_message(job_title, job_description, location)},
+            {
+                "role": "user",
+                "content": _build_user_message(job_title, job_description, location),
+            },
         ],
         max_retries=2,
         temperature=0,

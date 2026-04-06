@@ -129,6 +129,12 @@ python -m src.data_ingestion.pipeline --push        # DS only
 python -m src.data_ingestion.pipeline --full --push # DS + DA
 ```
 
+After updating `postprocess.py` (blocklist/normalisation), re-push the clean dataset without re-running extraction:
+
+```bash
+python -m src.data_ingestion.pipeline --postprocess --push
+```
+
 ### Run evaluation
 
 Samples n records, runs extraction + judge, saves full results.
@@ -213,11 +219,11 @@ After any new run, regenerate the trajectory plots:
 python -m src.evals.eval_trend
 ```
 
-### Current prompt: v32 (locked — batch pipeline pending)
+### Current prompt: v33 (locked — batch pipeline pending)
 
 **Stage 1 canonical baseline**: v9g (seed=42, overall=2.98) — validated on three independent seeds.
 
-**Stage 2** (v16+) introduced a breaking schema change — `skills_technical`/`nice_to_have`/`industry` replaced by `skills_required`/`skills_preferred`/`skills_soft` — making v1–v15 scores non-comparable. v21 is the best judge-scored result through v22; v28–v32 introduced architectural improvements (schema chain-of-thought, deterministic postprocessing) that supersede judge scores as a quality signal. **v32 is the locked batch prompt** — see [`docs/technical_report.md §9.13`](docs/technical_report.md) for full details.
+**Stage 2** (v16+) introduced a breaking schema change — `skills_technical`/`nice_to_have`/`industry` replaced by `skills_required`/`skills_preferred`/`skills_soft` — making v1–v15 scores non-comparable. v21 is the best judge-scored result through v22; v28–v33 introduced architectural improvements (schema chain-of-thought, deterministic postprocessing, responsibility scanning refinements) that supersede judge scores as a quality signal. **v33 is the locked batch prompt** — see [`docs/technical_report.md §9.15`](docs/technical_report.md) for full details.
 
 Stage 2 trajectory (seed=42, n=50):
 
@@ -239,7 +245,10 @@ Stage 2 trajectory (seed=42, n=50):
 | v28 | — | — | — | — | — | — | Schema chain-of-thought: `responsibility_skills_found` + `preferred_signals_found` scaffolding; prompt ~250→60 lines; salary/remote/employment removed |
 | v29–v30 | — | — | — | — | — | — | Iterative micro-refinements: field description tightening, scope constraints, CV test calibration |
 | v31 | — | — | — | — | — | — | Preferred-first field ordering (blast radius asymmetry confirmed); schema: scaffolding → skills_preferred → skills_required → skills_soft |
-| **v32** | — | — | — | — | — | — | **Locked batch prompt** — 3rd scaffolding field `all_technical_skills`; deterministic `postprocess()` enforces responsibility exclusion guarantee |
+| **v32** | — | — | — | — | — | — | 3rd scaffolding field `all_technical_skills`; deterministic `postprocess()` enforces responsibility exclusion guarantee. 28-posting human eval completed. |
+| v32b | — | — | — | — | — | — | Surgical fix: exclude discipline names/field labels from `responsibility_skills_found`. Resolved noise for standard roles; regressed biological/domain-heavy roles. |
+| v32c | — | — | — | — | — | — | Surgical fix: allow specific techniques (qPCR, flow cytometry, Monte Carlo, portfolio attribution) in `responsibility_skills_found`. Noise resolved across full 50-sample eval per Opus 4.6 review. |
+| **v33** | — | — | — | — | — | — | **Locked batch prompt** — section-boundary guard: when posting lacks clear headers, treat only day-to-day activity sentences as responsibilities. Opus 4.6 confirmed production-ready. |
 
 See [`docs/technical_report.md`](docs/technical_report.md) for the full version history and design decisions.
 
@@ -264,7 +273,7 @@ Score extractions yourself using the same 12-dimension schema as the judge. Prod
 ```python
 from src.evals.human_eval import load_run
 
-session = load_run("v32")   # loads latest run matching that version
+session = load_run("v33")   # loads latest run matching that version
 session.status()            # progress: N/50 scored
 
 session.show_description(ROW_ID)   # original posting
