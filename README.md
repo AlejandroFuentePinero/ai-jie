@@ -219,7 +219,7 @@ After any new run, regenerate the trajectory plots:
 python -m src.evals.eval_trend
 ```
 
-### Current prompt: v33 (locked — batch pipeline pending)
+### Current prompt: v33 (batch complete — production-grade)
 
 **Stage 1 canonical baseline**: v9g (seed=42, overall=2.98) — validated on three independent seeds.
 
