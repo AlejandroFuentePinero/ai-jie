@@ -30,7 +30,7 @@ async def run_pipeline(
     df: pd.DataFrame,
     output_path: Path,
     concurrency: int = 20,
-    prompt_version: str = "v32",
+    prompt_version: str = "v33",
 ) -> pd.DataFrame:
     """
     Extract structured data from all rows in df using async concurrency.
