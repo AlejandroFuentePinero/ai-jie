@@ -193,7 +193,10 @@ def postprocess_df(df: pd.DataFrame) -> pd.DataFrame:
 
     Returns a copy of df with corrections applied.
     """
-    if "responsibility_skills_found" not in df.columns or "skills_preferred" not in df.columns:
+    if (
+        "responsibility_skills_found" not in df.columns
+        or "skills_preferred" not in df.columns
+    ):
         return df
 
     df = df.copy()
@@ -211,12 +214,16 @@ def postprocess_df(df: pd.DataFrame) -> pd.DataFrame:
             df.at[idx, "skills_required"] = new_required
             n_moved += len(set(preferred_before or []) - set(new_preferred or []))
 
-    print(f"  Responsibility exclusion: moved {n_moved} skill token(s) across {len(df)} records.")
+    print(
+        f"  Responsibility exclusion: moved {n_moved} skill token(s) across {len(df)} records."
+    )
 
     for col in ("skills_required", "skills_preferred"):
         if col in df.columns:
             df[col] = df[col].apply(
-                lambda tokens: _remove_blocked(tokens) if isinstance(tokens, list) else tokens
+                lambda tokens: (
+                    _remove_blocked(tokens) if isinstance(tokens, list) else tokens
+                )
             )
 
     return df

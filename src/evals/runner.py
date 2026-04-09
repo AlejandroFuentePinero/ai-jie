@@ -3,10 +3,10 @@ Evaluation runner: sample → extract → judge → persist results.
 
 Sample size rationale
 ─────────────────────
-Default n=30.  At 18 scoring dimensions that is 540 individual scores.
+Default n=30.  At 12 scoring dimensions that is 360 individual scores.
 • Satisfies CLT (n≥30) for reliable means and confidence intervals.
 • Detects a ~0.15 point regression on the 1-3 scale with ~80% power.
-• Completes in ~3-5 min and costs ~$0.15 (gpt-4o-mini extract + gpt-4o judge).
+• Completes in ~3-5 min and costs ~$0.15 (gpt-5.4-mini for both extraction and judging).
 • For pre-release / prompt-version comparisons use n=50 for tighter intervals.
 
 Output layout (one timestamped directory per run)
@@ -227,6 +227,6 @@ if __name__ == "__main__":
     print(f"Loaded {len(df)} rows")
 
     results = asyncio.run(
-        run_eval(df, output_root=EVALS_RESULTS_DIR, n=RELEASE_N, seed=42, prompt_version="v32")
+        run_eval(df, output_root=EVALS_RESULTS_DIR, n=RELEASE_N, seed=42, prompt_version="v33")
     )
     print(f"\nFinal results shape: {results.shape}")

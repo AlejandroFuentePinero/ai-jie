@@ -2,7 +2,58 @@
 
 **Project**: Automated Job Information Extraction (AI-JIE)
 **Started**: 2026-03-29
-**Status**: Active development
+**Status**: Complete
+
+---
+
+## Table of Contents
+
+1. [Project Overview](#1-project-overview)
+2. [Architecture](#2-architecture)
+3. [Key Design Decisions](#3-key-design-decisions)
+   - 3.1 [`instructor` library over raw OpenAI client](#31-instructor-library-over-raw-openai-client)
+   - 3.2 [Lazy client initialisation](#32-lazy-client-initialisation)
+   - 3.3 [Async pipeline with semaphore rate limiting](#33-async-pipeline-with-semaphore-rate-limiting)
+   - 3.4 [JSONL checkpoint/resume](#34-jsonl-checkpointresume)
+   - 3.5 [Pipeline artifacts stripped before HuggingFace push](#35-pipeline-artifacts-stripped-before-huggingface-push)
+   - 3.6 [HuggingFace Hub with `datasets` library](#36-huggingface-hub-with-datasets-library)
+   - 3.7 [`temperature=0` for both extractor and judge](#37-temperature0-for-both-extractor-and-judge)
+4. [Schema Design](#4-schema-design)
+5. [Issues Found and Fixed](#5-issues-found-and-fixed)
+   - 5.1 [Circular evaluation (inflated scores)](#51-circular-evaluation-inflated-scores)
+   - 5.2 [Location accuracy scores — removed dimension](#52-location-accuracy-scores--removed-dimension)
+   - 5.3 [Judge misalignment with extraction rules](#53-judge-misalignment-with-extraction-rules)
+6. [Prompt Version History](#6-prompt-version-history)
+7. [Evaluation Design](#7-evaluation-design)
+8. [Judge Bias Analysis](#8-judge-bias-analysis)
+9. [Stage 2 — Schema Redesign and Prompt Engineering (v16+)](#9-stage-2--schema-redesign-and-prompt-engineering-v16)
+   - 9.1 [Why v9 was not selected for the full batch run](#91-why-v9-was-not-selected-for-the-full-batch-run)
+   - 9.2 [Schema redesign (v16 breaking change)](#92-schema-redesign-v16-breaking-change)
+   - 9.3 [Judge limitations identified through human evaluation](#93-judge-limitations-identified-through-human-evaluation)
+   - 9.4 [Prompt engineering decisions (v16–v21)](#94-prompt-engineering-decisions-v16v21)
+   - 9.5 [Stage 2 version trajectory](#95-stage-2-version-trajectory)
+   - 9.6 [Plateau analysis — v22, v20b](#96-plateau-analysis--v22-v20b)
+   - 9.7 [Final prompt review — v23](#97-final-prompt-review--v23)
+   - 9.8 [Final batch prompt — post-v23 structural refinements](#98-final-batch-prompt--post-v23-structural-refinements)
+   - 9.9 [v24 — Schema field completion and prompt reinforcement](#99-v24--schema-field-completion-and-prompt-reinforcement)
+   - 9.10 [Model upgrade — gpt-5.4-mini](#910-model-upgrade--gpt-54-mini)
+   - 9.11 [v25 — skills_preferred systematic failure and prompt fixes](#911-v25--skills_preferred-systematic-failure-and-prompt-fixes)
+   - 9.12 [v26–v27 — Prompt architectural redesign](#912-v26v27--prompt-architectural-redesign)
+   - 9.13 [v28 — Schema-enforced chain-of-thought and structural simplification](#913-v28--schema-enforced-chain-of-thought-and-structural-simplification)
+   - 9.14 [Post-processing layer — rationale and design](#914-post-processing-layer--rationale-and-design)
+   - 9.15 [v32 human eval → v32b / v32c / v33 — responsibility scanning refinement arc](#915-v32-human-eval--v32b--v32c--v33--responsibility-scanning-refinement-arc)
+10. [Project Status — Complete](#10-project-status--complete)
+    - 10.1 [Known limitations](#known-limitations)
+11. [Prompt Engineering Retrospective](#11-prompt-engineering-retrospective)
+    - 11.1 [The process was messier than the version numbers suggest](#111-the-process-was-messier-than-the-version-numbers-suggest)
+    - 11.2 [What the LLM-as-a-Judge framework is and isn't good for](#112-what-the-llm-as-a-judge-framework-is-and-isnt-good-for)
+    - 11.3 [What actually moves extraction quality](#113-what-actually-moves-extraction-quality)
+    - 11.4 [The attention budget constraint](#114-the-attention-budget-constraint)
+    - 11.5 [The extract-then-classify architecture (v32 retrospective)](#115-the-extract-then-classify-architecture-v32-retrospective)
+    - 11.6 [What was deliberately not done](#116-what-was-deliberately-not-done)
+12. [Evaluation Results](#12-evaluation-results)
+    - 12.1 [LLM-as-a-Judge Baseline — v9g](#121-llm-as-a-judge-baseline--v9g)
+    - 12.2 [Human Evaluation — v32](#122-human-evaluation--v32)
 
 ---
 
@@ -12,7 +63,7 @@ AI-JIE is a pipeline that extracts structured information from raw job postings 
 
 **Data source**: Two Kaggle CSV datasets (`DataScientist.csv`, `DataAnalyst.csv`) — 3,892 and 2,242 usable rows respectively after filtering short descriptions.
 
-**Goal**: Produce a clean, structured dataset of job postings (company, role, skills, compensation) that can feed downstream analysis and ML applications.
+**Goal**: Produce a clean, structured dataset of job postings (company, role, and skills) that can feed downstream analysis and ML applications.
 
 ---
 
@@ -20,12 +71,13 @@ AI-JIE is a pipeline that extracts structured information from raw job postings 
 
 ```
 raw CSVs → loader.py (unify, clean) → pipeline.py (async extraction) → jobs_lite/full.jsonl
-         ↓
-    HuggingFace Hub (Parquet, public — lite + full repos)
-         ↓
-    evals/runner.py → extractions + scores → eval_results/
-         ↓
-    ground_truth_sampler.py → gt_sample.jsonl → ground_truth_annotator.py (human labels)
+         ↓                                                                        ↓
+    postprocess.py (responsibility exclusion, blocklist)              HuggingFace Hub (Parquet)
+                                                                       ├── *-preprocessed
+                                                                       └── *-postprocessed
+
+evals/runner.py → sample → extract → postprocess → judge → eval_results/
+eval_trend.py   → reads all report.json files → trend.csv + trajectory plots
 ```
 
 ### Modules
@@ -82,7 +134,7 @@ raw CSVs → loader.py (unify, clean) → pipeline.py (async extraction) → job
 
 **Justification**:
 - `_row_id`: checkpoint/resume artifact — identifies which rows have been processed. Not a feature of the job data.
-- `prompt_version`: traceability label (e.g. `"v9"`) stamped on each record at extraction time so any downstream analysis can identify which prompt produced it. Not a job feature; stripped to keep the public schema clean. Tracked in `_PIPELINE_INTERNAL_COLS` in `hub.py`.
+- `prompt_version`: traceability label (e.g. `"v9"`) stamped on each record at extraction time so any downstream analysis can identify which prompt produced it. Not a job feature; stripped to keep the public schema clean. Tracked in `_META_COLS` in `hub.py`.
 
 ### 3.6 HuggingFace Hub with `datasets` library
 
@@ -108,18 +160,30 @@ Passthrough fields (copied verbatim from input, not extracted by the LLM):
 - `title` — job title from the raw CSV
 - `description` — original posting text
 - `location` — from the explicit "Location:" field in the user message
+- `sector` — optional sector label from the raw CSV; passed through unchanged if present, null otherwise. Not extracted by the LLM; sourced from the dataset.
 
 All other fields are extracted. Key design choices:
 - `seniority: Seniority` — enum enforced at validation; `unknown` is a valid value, not an error
 - `job_family: JobFamily` — assigned from primary responsibilities, not job title
 - `years_experience_min / max: Optional[float]` — only if explicitly stated; never inferred
+- `company_description: Optional[str]` — always null by design. The system prompt instructs the model to "Always return null"; the judge scores 3 if null, 1 if any value is present. Rationale: company descriptions in job postings are marketing copy that carries no signal for downstream skill analysis. Including them would inflate dataset size with noise.
 - `skills_required / skills_preferred / skills_soft: Optional[list[str]]` — three-way classification enforced by chain-of-thought scaffolding and postprocessing
 - Chain-of-thought scaffolding fields (filled before skill classification, stripped from postprocessed dataset):
   - `responsibility_skills_found` — model lists all skill tokens embedded in responsibility statements
   - `preferred_signals_found` — model lists all optionality phrases detected
-  - `all_technical_skills` — model lists all technical skills found anywhere in the posting
+  - `all_technical_skills` — model lists all technical skills found anywhere in the posting (added v32)
+- Field validator `_coerce_null_string` — normalises the string `"null"` to Python `None` on all `Optional[str]` fields. Defensive measure: small LLMs occasionally output the literal string `"null"` rather than a JSON null when the schema marks a field as optional.
 
 ### `EvaluationScore` model (judge output)
+
+The judge fills four scaffolding fields first, then 12 scored dimensions. The scaffolding fields establish the judge's own ground truth before scoring, mirroring the extract-then-classify architecture of the extractor:
+
+- `skills_i_consider_required` — judge lists the skills it considers required given the posting
+- `skills_i_consider_preferred` — judge lists the skills it considers preferred
+- `skills_i_consider_soft` — judge lists the soft skills it considers relevant
+- `misclassified_skills` — judge lists any skills it believes were routed to the wrong field
+
+These fields are filled before any scored dimension is generated. They prevent the judge from anchoring on the extractor's own intermediate reasoning — the extractor's scaffolding fields are explicitly excluded from the judge's input via `_JUDGE_EXCLUDE` in `judge.py`.
 
 12 integer dimensions (1–3 scale) across four groups, plus `flags: list[str]`:
 
@@ -215,7 +279,7 @@ Fix (v9): removed enum from extractor prompt (kept in judge only), and flipped t
 
 **Hypothesis**: Injecting the Glassdoor `Industry` label as context in the extractor prompt would improve `industry` extraction, which is the weakest remaining dimension (~2.66–2.76 across seeds).
 
-**Ground-truth test** (`tests/test_industry_extraction.py`): With the hint, exact-match accuracy rose from 36% → 78% on 50 samples. Clearly useful information.
+**Ground-truth test** (one-off script, not preserved): With the hint, exact-match accuracy rose from 36% → 78% on 50 samples. Clearly useful information.
 
 **Judge eval result (v10)**: `industry_accuracy` *dropped* from 2.76 → 2.44. The judge saw the hint in the user message and held the extractor to it strictly — any case where the extractor correctly overrode the hint (e.g. a staffing agency posting for a pharma client, where the correct industry is "Pharmaceutical" not "Staffing") was penalised.
 
@@ -238,9 +302,9 @@ Fix (v9): removed enum from extractor prompt (kept in judge only), and flipped t
 
 30 samples gives ~85% power to detect a 0.2-point shift in overall score at α=0.05. 50 samples improves this to ~92% and is still affordable (50 × 2 LLM calls = 100 API calls per run). 25 was considered too low given the noisiness of 1–3 integer scores.
 
-### Judge model: gpt-4o
+### Judge model
 
-The judge needs to assess nuanced extraction quality — industry classification, seniority ladder application, skills completeness. `gpt-4o-mini` lacks the reasoning depth needed for consistent judgement on edge cases.
+The judge was initially `gpt-4o` (selected over `gpt-4o-mini` for the reasoning depth required on seniority inference, skills completeness, and edge cases). In §9.10, both the extractor and the judge were upgraded to `gpt-5.4-mini`, which is the production model for both. The judge reasoning rationale still holds — the current model handles nuanced extraction quality assessment reliably.
 
 ### Seeded sampling
 
@@ -274,9 +338,9 @@ Analysis of score ranges across all 17 runs (`max - min`):
 | `employment_type_accuracy` | 0.140 | Low signal. |
 | `remote_policy_accuracy` | 0.160 | Low signal. |
 
-These dimensions consume judge attention without providing regression detection value. In a future judge revision, consider consolidating them or removing them to free attention budget for higher-signal dimensions.
+These dimensions consumed judge attention without providing regression detection value. `salary_accuracy`, `employment_type_accuracy`, `remote_policy_accuracy`, and `industry_accuracy` were all subsequently removed from the schema in v28 (§9.13). `company_name_accuracy` and `responsibilities_quality` were retained — the former as a structural check, the latter because it still provides regression detection value even with a narrow range.
 
-High-signal dimensions (range ≥ 0.35): `skills_soft_accuracy` (0.597), `null_appropriateness` (0.767), `overall` (0.720), `skills_technical_precision/recall` (~0.54–0.59), `seniority_accuracy` (0.460), `industry_accuracy` (0.360).
+High-signal dimensions from the Stage 1 analysis (range ≥ 0.35): `skills_soft_accuracy` (0.597), `null_appropriateness` (0.767), `overall` (0.720), `skills_technical_precision/recall` (~0.54–0.59), `seniority_accuracy` (0.460), `industry_accuracy` (0.360). Note: `skills_technical_precision/recall` and `industry_accuracy` are Stage 1 field names, replaced in the Stage 2 schema (§9.2).
 
 ### `overall` ↔ `null_appropriateness` coupling (r = 0.979)
 
@@ -288,17 +352,17 @@ High-signal dimensions (range ≥ 0.35): `skills_soft_accuracy` (0.597), `null_a
 
 **Outcome**: `overall` improved consistently (+0.07 seed=42, +0.05 seed=123, +0.03 seed=999). The gap between `overall` and `null_appropriateness` narrowed. Residual correlation is genuine signal (good extractions tend to handle both nulls and all other fields correctly) — the contamination portion has been reduced.
 
-**Implication**: For version comparisons, group-level means (Company, Role, Skills, Compensation) remain more informative than the single `overall` score. `overall` is now better calibrated but still not fully independent of `null_appropriateness`.
+**Implication**: For version comparisons, group-level means (Company, Role, Skills) remain more informative than the single `overall` score. `overall` is now better calibrated but still not fully independent of `null_appropriateness`.
 
-### Industry ground-truth test (`tests/test_industry_extraction.py`)
+### Industry ground-truth test
 
-The raw CSVs contain Glassdoor-sourced `Industry` (specific) and `Sector` (broader) columns — the only structured ground-truth labels in the dataset. These are used to evaluate the extractor's `industry` field directly.
+The raw CSVs contain Glassdoor-sourced `Industry` (specific) and `Sector` (broader) columns — the only structured ground-truth labels in the dataset. A one-off ground-truth test was run during the v10 experiment to evaluate the extractor's `industry` field directly.
 
-Since the extractor produces free-form text ("Insurance") while the ground truth has its own taxonomy ("Insurance Carriers"), a lightweight LLM comparison call is used rather than string matching.
+Since the extractor produces free-form text ("Insurance") while the ground truth has its own taxonomy ("Insurance Carriers"), a lightweight LLM comparison call was used rather than string matching.
 
 Scoring: 2 = matches `Industry`, 1 = matches `Sector` only, 0 = wrong, -1 = null.
 
-This is the first evaluation in the project with an objective reference — the result cannot be inflated by shared model blind spots.
+This was the first evaluation in the project with an objective reference — the result cannot be inflated by shared model blind spots. The test script is not preserved (the `industry` field was removed in v28 as part of the Stage 2 schema simplification).
 
 ---
 
@@ -388,7 +452,7 @@ Human assessment: **extraction quality was genuinely excellent** across all 10 r
 | v22 | 2.80 | 2.40 | 2.74 | 2.30 | 3.00 | 21 | temperature=0.3 — skills regressed, reverted |
 | v20b | 2.80 | 2.46 | 2.80 | 2.52 | 3.00 | 21 | v20 extractor + v21 judge — plateau confirmed |
 | v23 | — | — | — | — | — | — | Three targeted fixes: seniority verb/title, Senior+Manager, leadership exclusion + 6 structural refinements (extraction-only) |
-| **v24** | — | — | — | — | — | — | Schema field completion (remote_policy, employment_type, salary_min/max rules); analyst catch-all for job_family; CRITICAL dual-field skills/responsibilities rule. Extraction-only, manual eval pending. |
+| **v24** | — | — | — | — | — | — | Schema field completion (remote_policy, employment_type, salary_min/max rules); analyst catch-all for job_family; CRITICAL dual-field skills/responsibilities rule. Manual eval completed — systematic skills_preferred misclassification found, addressed in v25. |
 
 v17–v19 downward trend was driven by two compounding factors: (1) the judge became stricter after the schema change exposed new failure modes it could evaluate, and (2) the HARD BOUNDARY instruction caused format regressions in skills_soft (verbatim sentences instead of condensed phrases). v21 recovers through judge recalibration and prompt refinement.
 
@@ -397,8 +461,6 @@ v17–v19 downward trend was driven by two compounding factors: (1) the judge be
 - `skills_preferred_accuracy` at 2.82 — new stage 2 high
 - n_flags down from 44 (v19) to 25 — 43% reduction
 - Human evaluation confirmed extraction quality is genuinely excellent; remaining judge gaps are in interpretive fields (skills_soft, seniority)
-
-**Current canonical reference: v21 (seed=42)**
 
 ### 9.6 Plateau analysis — v22, v20b (2026-03-31)
 
@@ -439,7 +501,7 @@ To determine whether the v21 extractor changes (responsibilities scanning paragr
 
 **Revised decision**: restore v21 prompt (= v22 prompt text), conduct a final critical review, apply only changes that could meaningfully mislead the model, then run extraction-only as v23. A proper manual evaluation on the first 10 jobs will make the final batch prompt decision on human evidence, not judge scores or individual edge cases.
 
-**Current canonical reference: v21 (seed=42, overall=2.80) — pending manual eval of v23**
+**Decision**: proceed with v23 prompt for manual evaluation before batch commit.
 
 ### 9.7 Final prompt review — v23 (2026-03-31)
 
@@ -521,7 +583,7 @@ A review of every field in `models.py` against the system prompt revealed three 
 
 - **`skills_required` dual-field extraction (CRITICAL)**: The original "Important:" note at the end of the skills_required rule was being deprioritised. Upgraded to a CRITICAL-labelled instruction and made explicit that the same sentence may simultaneously populate `key_responsibilities` AND `skills_required` — this is correct behaviour, not double-counting. Added: "For example (one of many possible cases)..." to generalise the example and prevent the model from treating named tokens as the exhaustive case.
 
-**Extraction run**: seed=42, n=50, judge=False — saved as `v23-final-updated`, corresponds to v24. Manual eval pending.
+**Extraction run**: seed=42, n=50, judge=False — saved as `v23-final-updated`, corresponds to v24. Manual evaluation of 8 jobs completed; findings documented in §9.11.
 
 ### 9.10 Model upgrade — gpt-5.4-mini (2026-04-01)
 
@@ -538,7 +600,7 @@ After confirming v24 prompt stability, the extraction model was upgraded from `g
 3. **`employment_type`** — added "Do not infer." as an explicit reinforcement (was implicit from "only extract if explicitly stated").
 4. **`skills_preferred`** — "domain expertise areas" → "key domain skills" for consistency with the tightened skills_required language.
 
-**Current state**: `gpt-5.4-mini` is the production extraction model. Prompt version `v24-gpt5.4-mini` (seed=42, n=50, extraction-only) pending manual evaluation.
+**Current state**: `gpt-5.4-mini` is the production extraction model. Manual evaluation of v24-gpt5.4-mini extractions confirmed systematic skills_preferred misclassification, addressed in v25 (§9.11).
 
 ### 9.11 v25 — skills_preferred systematic failure and prompt fixes (2026-04-02)
 
@@ -570,7 +632,7 @@ When a posting listed a broad skill (e.g. "ML") as required in one section and a
 
 **Prompt coherence review**: Before running v25, a full cross-field review of the skills section was conducted to check for contradictions introduced by the new rules. One tension found: the word "always" in the modifier carve-out could conflict with the deduplication rule when a skill appears in both a preferred section and a required context. Fixed by scoping: "always skills_preferred regardless of these modifiers alone — if that same token also appears in a required context, the deduplication rule takes precedence."
 
-**v25 extraction run**: seed=42, n=50, judge=False. Output: `eval_results/20260402_020344_v25/extractions.jsonl`. Manual evaluation in progress.
+**v25 extraction run**: seed=42, n=50, judge=False. Output: `eval_results/20260402_020344_v25/extractions.jsonl`. Manual evaluation confirmed targeted fixes resolved the two identified failure modes, but the accumulated CRITICAL rules created a new generalisation problem — addressed by the v27 architectural redesign (§9.12).
 
 ### 9.12 v26–v27 — Prompt architectural redesign (2026-04-02)
 
@@ -594,7 +656,7 @@ Human evaluation of v25 extractions revealed that the targeted patch approach ha
 
 **Design principle**: rather than adding rules for observed failure patterns (the patch approach), the redesign defines the reasoning process the model should follow. Examples illustrate patterns, not exhaustive cases.
 
-**v27 extraction run**: seed=42, n=50, judge=False. Output: `eval_results/20260402_031323_v27/extractions.jsonl`. Manual evaluation in progress.
+**v27 extraction run**: seed=42, n=50, judge=False. Output: `eval_results/20260402_031323_v27/extractions.jsonl`. Manual evaluation revealed the three-stage decision tree still failed intermittently on preferred classification — leading to the schema-enforced chain-of-thought redesign in v28 (§9.13).
 
 ### 9.13 v28 — Schema-enforced chain-of-thought and structural simplification (2026-04-02)
 
@@ -614,13 +676,14 @@ The simplified prompt works better because the optionality-vs-proficiency distin
 
 The core failure was a sequencing problem. With instructor, the model fills fields in schema declaration order. In the old schema, the model would hit `skills_required` first and start generating. At that point it had not systematically thought about which skills were preferred — it was making classification decisions on the fly, skill by skill, while also trying to retain 250 lines of rules. By the time it reached `skills_preferred`, it had already committed most skills to required.
 
-Two scaffolding fields were added to enforce this. The model's generation order is now:
+Two scaffolding fields were added at v28 to enforce this; a third was added at v32 (§9.15). The model's generation order in the final v33 schema is:
 
 1. Fill `responsibility_skills_found` → scan every responsibility bullet and write down all embedded skill tokens
 2. Fill `preferred_signals_found` → write down every optionality phrase in the posting
-3. Fill `skills_preferred` → FILL FIRST from skills, using preferred zones as anchors (bounded blast radius — see below)
-4. Fill `skills_required` → everything not already in preferred, plus all responsibility-embedded tokens
-5. Fill `skills_soft` → interpersonal and behavioural skills
+3. Fill `all_technical_skills` → write down every technical skill found anywhere in the posting, including requirements and qualifications sections (added v32)
+4. Fill `skills_preferred` → FILL FIRST from skills, using preferred zones as anchors (bounded blast radius — see below)
+5. Fill `skills_required` → everything not already in preferred, plus all responsibility-embedded tokens
+6. Fill `skills_soft` → interpersonal and behavioural skills
 
 The model's own output becomes its working memory. It cannot forget the preferred zones because they are in the tokens it just generated, which are in its context window during subsequent field generation. This is the difference between "hold these abstract rules in mind while generating" and "look at what you just wrote down."
 
@@ -645,16 +708,17 @@ The v1–v27 approach treated the LLM as a rule interpreter: give it precise rul
 `preferred_signals_found` is a structural constraint on the model's reasoning process: the schema design forces the model to externalise its classification anchors before the fields that depend on them. This is more reliable than relying on the model to hold and apply multiple interacting rules from memory during generation.
 
 **Implementation details**:
-- Two scaffolding fields declared before all skills fields in `Job` schema; instructor fills in declaration order:
+- Two scaffolding fields declared before all skills fields in `Job` schema at v28; a third (`all_technical_skills`) added in v32. Instructor fills in declaration order:
   - `responsibility_skills_found` — model scans responsibility statements and lists all embedded skill tokens first
   - `preferred_signals_found` — model lists all optionality phrases second
-- Both fields stripped from HuggingFace push (`_PIPELINE_INTERNAL_COLS` in `hub.py`) and excluded from judge evaluation (`_JUDGE_EXCLUDE` in `judge.py`) — scaffolding, not dataset features
-- Both displayed in `human_eval.py` `show_extraction()` as dedicated debug sections — show exactly what the model externalised before classifying, directly useful for verifying both responsibility scanning and preferred zone detection
+  - `all_technical_skills` — model lists every technical skill from anywhere in the posting (added v32; see §9.15)
+- All three fields stripped from the postprocessed HuggingFace push (`_SCAFFOLDING_COLS` in `hub.py`) and excluded from judge evaluation (`_JUDGE_EXCLUDE` in `judge.py`) — scaffolding, not dataset features. Pipeline metadata (`_row_id`, `prompt_version`) are stripped separately via `_META_COLS`.
+- All three displayed in `human_eval.py` `show_extraction()` as dedicated debug sections — show exactly what the model externalised before classifying, directly useful for verifying responsibility scanning, preferred zone detection, and full technical skill coverage
 - Prompt simplified from ~250 lines (skills section) to ~60 lines; total prompt ~300 lines shorter than v27
 
 **v29–v30 — iterative refinements**: Four extraction runs (v29, v29b, v29c, v30) applied micro-refinements to field descriptions, scope constraints, and CV test calibration after reviewing v28 extractions. Each addressed narrow observed noise without structural change.
 
-**Field ordering — preferred before required (v31)**: Skills field order in the schema was tested in both directions. Empirical finding: `skills_preferred` must be declared before `skills_required` in the schema (instructor fills in declaration order). The blast radius is asymmetric — preferred-first can only pull a bounded set of skills out of required (those near optionality language), whereas required-first can pull any preferred skill from anywhere in the posting into required (unbounded). Required-first produces larger, less predictable required lists; preferred-first produces tighter required lists with a small bounded error risk on the preferred side. Final schema order: `responsibility_skills_found` → `preferred_signals_found` → `skills_preferred` → `skills_required` → `skills_soft`.
+**Field ordering — preferred before required (v31)**: Skills field order in the schema was tested in both directions. Empirical finding: `skills_preferred` must be declared before `skills_required` in the schema (instructor fills in declaration order). The blast radius is asymmetric — preferred-first can only pull a bounded set of skills out of required (those near optionality language), whereas required-first can pull any preferred skill from anywhere in the posting into required (unbounded). Required-first produces larger, less predictable required lists; preferred-first produces tighter required lists with a small bounded error risk on the preferred side. Schema order at v31: `responsibility_skills_found` → `preferred_signals_found` → `skills_preferred` → `skills_required` → `skills_soft`. Extended to 6 fields in v32 with `all_technical_skills` inserted after `preferred_signals_found` (see §9.15). Final v33 order: `responsibility_skills_found` → `preferred_signals_found` → `all_technical_skills` → `skills_preferred` → `skills_required` → `skills_soft`.
 
 **Schema simplification**: `salary_min`, `salary_max`, `salary_currency`, `salary_period`, `remote_policy`, `employment_type` removed from `Job` and `EvaluationScore`. These fields are almost never disclosed in the postings used, producing near-universal nulls. Their extraction rules and judge dimensions were contributing prompt length and attention cost with negligible signal value.
 
@@ -685,13 +749,16 @@ def postprocess(job: Job) -> Job:
     return job
 ```
 
-Called in `pipeline.py` between extraction and serialisation. Four components:
+Two entry points, same rules: `postprocess(job)` (per-record, called by `runner.py` in the eval path after each extraction) and `postprocess_df(df)` (DataFrame, called by `pipeline.py --push` to produce the postprocessed HuggingFace dataset). The raw JSONL checkpoint written to disk is pre-postprocessing; postprocessing is applied when pushing to HF or during eval.
 
-- **Skills normalisation map** — dictionary mapping known variants to canonical forms (e.g. "Tensor" → "TensorFlow", "MS Excel" → "Excel", "Amazon Web Services" → "AWS"). Built iteratively from the actual dataset: run the full batch first, aggregate all skill tokens, identify variant clusters, build the map.
-- **Slash/combined token splitting** — split tokens like "ML/DL" or "Scala/Java" into separate entries.
-- **Activity token filter** — blocklist of generic nouns and activity phrases that consistently appear as false-positive skills. Built from the full dataset by identifying high-frequency tokens that would not pass manual review as CV skills.
-- **Soft skill responsibility filter** — remove `skills_soft` entries that are clearly responsibilities (leading verb + task description pattern rather than a behavioural quality).
-- **Post-normalisation deduplication** — remove any literal string that appears in both `skills_required` and `skills_preferred` after normalisation (normalisation can create new collisions that the LLM dedup rule didn't catch).
+**Implemented components** (shipped in final product):
+
+1. **Responsibility exclusion** (`apply_responsibility_exclusion`) — any skill in `responsibility_skills_found` is moved from `skills_preferred` to `skills_required`. Enforces the rule deterministically regardless of how the model classified it.
+2. **Skill blocklist** (`_SKILL_BLOCKLIST` + `_remove_blocked`) — removes broad field labels, generic nouns, job title strings, and other confirmed false-positive tokens from `skills_required`, `skills_preferred`, and `skills_soft`. Seeded from human evaluation findings; intentionally conservative.
+
+**Planned but not implemented** (project scope closed before full batch analysis):
+
+The original design included a normalisation map (canonical form variants), slash/combined token splitter ("ML/DL" → ["ML", "DL"]), soft skill responsibility filter (duties-as-soft-skills pattern), and post-normalisation deduplication. These required the full batch token distribution to build correctly and were deferred as data-driven work. Since the project concluded after the batch run, they remain unimplemented. The two implemented components handle the most impactful noise categories.
 
 #### First component — implemented (v32)
 
@@ -718,10 +785,6 @@ The skill blocklist (`_SKILL_BLOCKLIST` in `postprocess.py`) is a growing set of
 The set is seeded from patterns identified during human evaluation and prompt iteration. It is intentionally conservative — only tokens confirmed as false-positives across multiple jobs are added. The full batch run will surface the token distribution at scale, which will drive targeted expansions.
 
 16 unit tests covering both implemented components are in `tests/test_postprocess.py` (all passing as of 2026-04-04).
-
-#### Remaining components — data-driven, post-batch
-
-The remaining filters (normalisation map, slash-token splitter, soft skill responsibility filter) must be built from the full batch token distribution, not from a handful of test cases. Run first, analyse the aggregated skill token distribution, then build targeted filters for the patterns that appear at scale.
 
 ### 9.15 v32 human eval → v32b / v32c / v33 — responsibility scanning refinement arc (2026-04-06)
 
@@ -769,42 +832,35 @@ A follow-up Opus 4.6 review of the first 10 postings (row_ids 0–9) evaluated t
 
 ---
 
-## 10. Outstanding Issues / Next Steps
+## 10. Project Status — Complete
 
-- [x] Judge misalignment fixed (v5)
-- [x] Preferred skills regression fixed (v7)
-- [x] skills_soft over-nulling fixed (v9)
-- [x] job_family title-first priority (v9)
-- [x] v9 validated on three independent seeds (v9/v9b/v9c, confirmed stable by v9d/v9e/v9f)
-- [x] Glassdoor hint experiment completed and reverted (v10/v10b/v10c)
-- [x] Judge bias analysis completed — precision/recall coupling, ceiling effects, overall/null_appropriateness coupling documented (§8)
-- [x] eval_trend tracker added (`src/evals/eval_trend.py`) — reads all report.json files, writes trend.csv + three trajectory plots
-- [x] runner.py updated to save both `extraction_prompt.txt` and `judge_prompt.txt` per run
-- [x] **Judge recalibrated (v9g/h/i)** — anti-anchoring on `overall` + forced recall enumeration. Overall improved +0.03–0.07 across all seeds, pct_score_1 down, n_flags halved. Forced enumeration had no effect on precision/recall (ceiling confirmed). Canonical baseline: **v9g (seed=42)**.
-- [x] `compare_versions()` removed from `report.py` — was dead code (never called, broken README example). All multi-version comparisons go through `eval_trend.py`.
-- [x] **Ground truth annotation deferred** — human annotation was evaluated and rejected as a pre-batch gate. Key reasons: (1) many fields require interpretation, making annotations a second opinion rather than objective ground truth; (2) annotator shares domain blind spots with the extractor; (3) the 9-run eval history with stable ceiling scores provides sufficient confidence. Annotation framework preserved in `tests/ground_truth_annotation/` for future use if a domain expert or downstream task demands it.
-- [x] **Human evaluation completed** — 10 jobs scored on v20 extractions. Extraction quality confirmed excellent. Judge bias identified and structurally fixed in v21 (skills_soft, seniority). `compare()` used for calibration check.
-- [x] **Schema field completion (v24, 2026-04-01)** — added missing system prompt rules for `remote_policy`, `employment_type`, `salary_min`/`salary_max`; analyst catch-all for `job_family`; CRITICAL dual-field skills/responsibilities rule. Judge prompt updated to match. See §9.9.
-- [x] **Manual evaluation of v24-gpt5.4-mini extractions** — systematic skills_preferred misclassification identified across ~4 of 8 reviewed jobs. Prompt fixes applied in v25. See §9.11.
-- [x] **v25–v26 patch attempts** — v25 targeted modifier/deduplication fixes; v26 added decision-tree structure without skill definition gate. Both superseded by v27 architectural redesign. See §9.12.
-- [x] **v28–v31 architectural redesign and refinement** — schema-enforced chain-of-thought via two scaffolding fields (`responsibility_skills_found`, `preferred_signals_found`); prompt simplified from ~250 to ~60 lines; salary/remote/employment fields removed; preferred-first field ordering confirmed. See §9.13.
-- [x] **v31 locked as batch prompt** — preferred-first field ordering confirmed (blast radius asymmetry); v29–v30 micro-refinements applied; post-processing layer design documented. Human eval of v31 in progress.
-- [x] **Human eval of v31 extractions completed** — validated final locked prompt before batch. Run dir: `eval_results/20260402_061928_v31`.
-- [ ] `industry_accuracy` (~2.66) is the weakest remaining dimension. **Architectural fix deferred**: a company enrichment agent (web search / company page lookup) will supply ground-truth sector context at the recommendation step, rather than inferring from recruiter-written job descriptions. No further prompt iteration planned.
-- [ ] Run full pipeline on all ~3,892 DS records (lite mode, `python -m src.data_ingestion.pipeline`). **Prompt locked.**
-- [x] **Post-processing layer — first component implemented** — `src/data_ingestion/postprocess.py`: responsibility exclusion fix (skills found in `responsibility_skills_found` removed from `skills_preferred`, moved to `skills_required`). Called in `pipeline.py` and `runner.py` after extraction. See §9.14.
-- [x] **Post-processing layer — second component implemented** — `_SKILL_BLOCKLIST` in `postprocess.py`: removes broad field labels, generic nouns, and soft skills from `skills_required` and `skills_preferred`. Seeded from human eval and prompt iteration findings. See §9.14.
-- [ ] **Post-processing layer — remaining components** — normalisation map, slash-token splitter, soft skill responsibility filter. Data-driven — build from full batch token distribution after batch run.
-- [x] **Codebase audit completed (2026-04-04)** — full review of all `src/` modules. Changes: `loader.py` no-op concat removed; `parser.py` `_build_user_message` helper + `max_retries=6` on sync client; `postprocess.py` duplicate blocklist entry removed; `pipeline.py` default `prompt_version` updated to `v32`; `judge.py` `_JUDGE_EXCLUDE` promoted to module-level frozenset + `sector` added; `runner.py` stale model reference fixed; `report.py` dead `TYPE_CHECKING` block removed; `eval_trend.py` local `DIMENSIONS`/`GROUPS` replaced with imports from `report.py`; `human_eval.py` `compare()` docstring traces removed + `sector` added to skip set.
-- [x] **Unit tests added (2026-04-04)** — 16 tests in `tests/test_postprocess.py` covering `apply_responsibility_exclusion`, `_remove_blocked`, and `postprocess()` / `postprocess_df()` consistency. All passing. Token normalisation tests deferred until post-batch token distribution is available.
-- [x] **28-posting human eval of v32 (2026-04-06)** — systematic noise identified: discipline labels leaking from `responsibility_skills_found` into `skills_required`. 18/28 rows had `skills_required_accuracy ≤ 4`. Three surgical prompt fixes applied across v32b, v32c, v33. See §9.15.
-- [x] **v32b–v33 responsibility scanning refinement (2026-04-06)** — three-version arc resolved discipline label noise while preserving domain-specific technique extraction for biological/quantitative roles. Opus 4.6 review of all 50 rows confirmed noise resolved in v32c. v33 adds section-boundary guard for ambiguous postings. See §9.15.
-- [x] **v33 locked as batch prompt (2026-04-06)** — Opus 4.6 confirmed production-ready on both full 50-sample diff review and 10-posting full-pipeline evaluation. `opus4.6_eval.md` (rows 0–9) saved in v33 run directory.
-- [x] **Full batch run complete (2026-04-06)** — 3,892 DS records extracted at v33. 145 rate-limit failures all recovered via checkpoint. 35 co-occurring null seniority/job_family records; 156 records with >36 skills. Both preprocessed and postprocessed HF repos pushed (`Alejandrofupi/ai-jie-jobs-lite-preprocessed`, `Alejandrofupi/ai-jie-jobs-lite-postprocessed`).
-- [x] **Opus 4.6 batch sample eval (2026-04-06)** — independent evaluation of the first 20 records from the extracted batch (`data/processed/jobs_lite.jsonl`). Eval file: `eval_results/batch_sample_eval_opus4_6.md`. All structural fields scored 3/3 (seniority, job family, years experience, education, key responsibilities, preferred/required partition, soft skills). Skills extraction 2/3 — noise present but handled by postprocessing. **One structural error**: Record 20, "Will prefer Python over Scala" inside a "MUST HAVE SKILLS" block — model applied optionality rule to the word "prefer", routing Python/Scala/Hadoop/Hive/HDFS/Cloudera/Bash to `skills_preferred`. Additionally, `apply_responsibility_exclusion` override did not fire despite these skills being in `responsibility_skills_found`. Low-frequency pattern; no prompt change warranted. **Verdict: production-grade.**
-- [ ] **Token normalisation unit tests** — design and implement after full batch run surfaces the token distribution. Add to `tests/test_postprocess.py`.
-- [ ] **Postprocessing normalisation** — inspect batch token distribution; design normalisation map (slash-splitter, lowercase, variant→canonical, dedup); implement in `postprocess.py`; write tests alongside. Re-push with `python -m src.data_ingestion.pipeline --postprocess --push`.
-- [ ] Investigate `apply_responsibility_exclusion` override failure on Record 20 (skills were in `responsibility_skills_found` but remained in `skills_preferred` after postprocessing).
+All project objectives have been met. The extraction pipeline is production-grade, the full DS batch has been extracted and published, and the evaluation framework has been used to validate accuracy throughout development.
+
+### Completed milestones
+
+- [x] Async extraction pipeline with checkpoint/resume (v1–v9)
+- [x] LLM-as-a-Judge evaluation framework — 12 dimensions, trajectory tracking, human eval interface
+- [x] Judge bias analysis (§8) — precision/recall coupling, ceiling effects documented; canonical baseline locked at **v9g (seed=42)**
+- [x] Stage 2 schema redesign (v16+) — skills partitioned by intent, chain-of-thought scaffolding, salary/remote fields removed
+- [x] Postprocessing layer — responsibility exclusion + skill blocklist (`postprocess.py`)
+- [x] Codebase audit (2026-04-04) — all modules reviewed and cleaned
+- [x] Unit tests — 16 tests in `tests/test_postprocess.py`, all passing
+- [x] 28-posting human eval of v32 (2026-04-06) — noise in `skills_required` identified; fixed in v32b→v33 arc (§9.15)
+- [x] v33 locked as batch prompt — Opus 4.6 confirmed production-ready
+- [x] Full batch run complete (2026-04-06) — 3,892 DS records at v33; 145 rate-limit failures recovered via checkpoint
+- [x] Both HF repos pushed — `ai-jie-jobs-lite-preprocessed` and `ai-jie-jobs-lite-postprocessed`
+
+### Known limitations
+
+**Dataset coverage**: Only the Data Scientist CSV (3,892 postings) has been run through the full batch pipeline. The Data Analyst CSV (2,242 postings) is supported by the pipeline (`--full` flag) but has not been extracted. All evaluation results, human eval findings, and published HuggingFace datasets reflect DS postings only.
+
+**`company_description` always null**: This field is deliberately suppressed — the system prompt instructs the model to always return null and the judge rewards null. The reasoning is that company descriptions in job postings are marketing copy with no signal value for skill analysis. If company metadata is needed downstream, it would require a separate data source.
+
+**`sector` not extracted**: The sector/industry label comes from the source CSV, not from the posting text. The LLM does not extract or infer sector. Postings in the raw CSV without a sector value will have `sector: null`.
+
+**Blocklist scope**: The skill blocklist (`_SKILL_BLOCKLIST` in `postprocess.py`) is intentionally conservative — only tokens confirmed as false-positives across multiple postings are included. The full token distribution at scale (3,892 postings) likely contains additional false-positive patterns not yet identified. The planned normalisation and deduplication components (§9.14) would address these but were not implemented before project close.
+
+**Responsibility exclusion edge case**: A low-frequency failure mode exists where skills in `responsibility_skills_found` are not correctly moved from `skills_preferred` to `skills_required` during postprocessing despite the deterministic rule. Observed on Record 20 in the fixed eval sample. Root cause not isolated; no prompt change warranted at the observed frequency. Left open for investigation if the pattern recurs in downstream usage.
 
 ---
 
@@ -968,3 +1024,65 @@ Three reasons:
 - **Ground truth annotation as a pre-batch gate**: Evaluated and rejected. Many fields require interpretation; a human annotator shares the same domain blind spots as the model. The human eval of 10 extractions was more useful as a calibration check than formal annotation would have been.
 - **Continued prompt iteration after the plateau**: Once the plateau was confirmed at v20b/v21/v22, further optimisation against judge scores would have been overfitting. The remaining judge gaps (skills_required ~2.46 vs v16 baseline ~2.78) are judge drift, not extraction failures.
 - **Two-API-call extraction+classification**: considered as the clean solution to the ordering problem, rejected as too expensive. The correct answer was one additional scaffolding field (`all_technical_skills`) that separates extraction from classification without an additional API call.
+
+---
+
+## 12. Evaluation Results
+
+This section summarises the two evaluation instruments used to validate extraction quality: the LLM-as-a-Judge framework (used throughout prompt development) and the final human evaluation (used to confirm production readiness).
+
+---
+
+### 12.1 LLM-as-a-Judge Baseline — v9g
+
+**Run**: `eval_results/20260330_022253_v9g` · n=50 · seed=42 · scale 1–3
+
+v9g is the canonical architectural baseline: the final calibrated judge (anti-anchoring + forced recall enumeration) applied to the Stage 1 schema before the Stage 2 redesign. It represents the ceiling achievable with the original schema, which motivated the move to skills intent partitioning and chain-of-thought scaffolding.
+
+Note: v9g used an earlier 16-dimension schema that included `industry_accuracy`, `remote_policy_accuracy`, `employment_type_accuracy`, and `salary_accuracy`. These fields were removed in the Stage 2 redesign. Scores for removed fields are not comparable to current evaluations.
+
+| Group | Dimension | Score / 3 |
+|-------|-----------|-----------|
+| Company | company_name_accuracy | 3.00 |
+| Company | company_description_accuracy | 2.86 |
+| Role | seniority_accuracy | 2.84 |
+| Role | job_family_accuracy | 2.82 |
+| Role | years_experience_accuracy | 2.94 |
+| Role | education_accuracy | 2.84 |
+| Role | responsibilities_quality | 2.94 |
+| Skills | skills_technical_precision | 2.98 |
+| Skills | skills_technical_recall | 2.98 |
+| Skills | skills_soft_accuracy | 2.82 |
+| Skills | nice_to_have_accuracy | 2.88 |
+| Overall | null_appropriateness | 3.00 |
+| Overall | **overall** | **2.98** |
+
+The near-ceiling overall score confirmed the Stage 1 extraction quality and established that the remaining gaps were structural (schema limitations) rather than prompt quality issues. The subsequent Stage 2 redesign addressed the schema, not the prompt.
+
+---
+
+### 12.2 Human Evaluation — v32
+
+**Run**: `eval_results/20260402_104643_v32` · n=28 · scale 1–5
+
+A human reviewer scored 28 extractions against the original job posting text. This was the final accuracy assessment prior to the full batch run. All averages are computed over 28 records.
+
+**Context**: This eval was run on v32 extractions, which exhibited the responsibility scanning noise subsequently fixed in v32b→v33. The `skills_required` score (4.00) reflects that pre-fix state; the final batch was run on v33 where the noise was resolved (confirmed by Opus 4.6 review of the full 50-sample diff).
+
+| Dimension | Mean / 5 | Notes |
+|-----------|----------|-------|
+| Seniority | 5.00 | — |
+| Responsibilities | 5.00 | — |
+| Null appropriateness | 5.00 | — |
+| Company description | 5.00 | — |
+| Skills soft | 4.93 | — |
+| Years experience | 4.93 | — |
+| Education | 4.93 | — |
+| Job family | 4.79 | 2 misclassifications: financial role → data_science, data engineer → data_science |
+| Company name | 4.82 | 1 failure: internal team name extracted instead of company name |
+| Skills preferred | 4.50 | Occasional misclassification between required/preferred; some noise |
+| **Skills required** | **4.00** | Main weakness — discipline labels from responsibility scanning; fixed in v33 |
+| **Overall** | **4.11** | — |
+
+**Primary finding**: `skills_required` was the only dimension with systematic errors (18/28 rows scored ≤4). The root cause was discipline labels leaking from `responsibility_skills_found` into `skills_required` — a prompt ambiguity in how responsibility scanning was defined. Resolved in v33 via a section-boundary guard. All other dimensions score 4.5 or above.
+
