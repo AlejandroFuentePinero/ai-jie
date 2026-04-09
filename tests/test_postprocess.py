@@ -10,7 +10,8 @@ Covers the two deterministic rules applied to every extracted Job:
 Also verifies that postprocess() (per-record, eval path) and postprocess_df()
 (DataFrame, pipeline path) apply identical rules to the same input.
 
-Note: token normalisation tests will be added here once that step is designed.
+Note: normalisation (canonical forms, slash-token splitter, dedup) was planned but not
+implemented before project close — see §9.14 of the technical report.
 """
 
 import pandas as pd

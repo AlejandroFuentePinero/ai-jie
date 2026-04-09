@@ -175,10 +175,11 @@ def postprocess(job: Job) -> Job:
     )
 
     # Blocklist: remove role names, broad field labels, and generic activity nouns
-    # from all three skill fields. These carry no ecological signal.
+    # from skills_required and skills_preferred. These carry no ecological signal.
+    # skills_soft is intentionally excluded: the blocklist is seeded from technical
+    # skill noise patterns and would incorrectly remove legitimate soft skill tokens.
     job.skills_required = _remove_blocked(job.skills_required)
     job.skills_preferred = _remove_blocked(job.skills_preferred)
-    # job.skills_soft = _remove_blocked(job.skills_soft)
 
     return job
 

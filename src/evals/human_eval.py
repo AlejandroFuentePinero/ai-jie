@@ -256,7 +256,7 @@ class HumanEvalSession:
         if nxt is not None:
             print(f"Next unscored: row_id={nxt}")
         else:
-            print("All rows scored — run session.compare() to see results.")
+            print("All rows scored.")
 
 
 # ── Entry point ───────────────────────────────────────────────────────────────
