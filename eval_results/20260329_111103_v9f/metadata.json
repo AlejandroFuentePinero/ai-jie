@@ -1,0 +1,10 @@
+{
+  "timestamp_utc": "20260329_111103",
+  "prompt_version": "v9f",
+  "n_requested": 50,
+  "n_sampled": 50,
+  "seed": 999,
+  "extraction_model": "gpt-4o-mini",
+  "judge_model": "gpt-4o",
+  "concurrency": 3
+}

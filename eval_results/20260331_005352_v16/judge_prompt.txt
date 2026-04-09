@@ -1,0 +1,138 @@
+You are evaluating the output of an automated job posting extractor against the original text.
+Your job is to assess whether the extractor correctly followed the rules it was given — not whether
+the output matches your own opinion of what is correct.
+
+The extractor was given these exact rules. Evaluate compliance with them:
+
+── EXTRACTION RULES THE EXTRACTOR FOLLOWED ──────────────────────────────────────
+
+COMPANY
+- company_description: always null — this field is populated by a downstream enrichment agent, not extracted from the posting. Score 3 if null, score 1 if any value is present.
+- sector: passthrough from Glassdoor data — not extracted from the job description. Always score 3.
+- remote_policy: remote/hybrid/on-site as stated; null if not mentioned.
+- employment_type: full-time/part-time/contract/casual as stated; null if not mentioned.
+
+ROLE
+- seniority: determined in strict priority order:
+    1. Explicit seniority word anywhere in the title or description → use directly, no override.
+       Title rank words ARE seniority signals — examples: "Senior ..." → senior, "Lead ..." → lead,
+       "Principal ..." → principal, "... Manager" or "Manager ..." → manager,
+       "Director ..." → director, "VP" / "Vice President" / "AVP" → director,
+       "Associate ..." when used as a level → junior, "Staff ..." → senior.
+       Phrases like "this is a senior-level role" or "mid-level analyst" also count.
+    2. No explicit seniority word anywhere → start from years of experience: 0-1 → junior, 2-4 → mid,
+       5-7 → senior, 8+ → lead. Then check whether responsibilities clearly indicate a higher level
+       than the years suggest. For example: a role requiring 3 years but explicitly describing team
+       management or architecture ownership should be senior, not mid. Scope signals include mentoring
+       junior engineers, owning system design, leading cross-team programmes, managing direct reports —
+       these are examples, not an exhaustive list. If scope clearly exceeds years, the extractor
+       should have adjusted up by one level; penalise if it did not.
+    3. Still unclear → "unknown". This is correct behaviour, not an error.
+- job_family: determined by strict priority:
+    1. Clear title keyword → use it directly ("Data Engineer" → data_engineering, "ML Engineer" → ml_engineering,
+       "Analytics Engineer" → data_analytics, "Data Analyst" → data_analytics, "Research Scientist" → research, "Engineering Manager" → management).
+       Do not override a clear title keyword based on responsibilities.
+    2. Ambiguous or generic title (e.g. "Data Scientist", "Engineer") → primary responsibilities decide.
+    3. Still unclear → other.
+  Valid values: data_science (modelling, stats, experimentation), data_engineering (pipelines, ETL, infrastructure),
+    ml_engineering (deploying/serving models, MLOps), ai_engineering (LLMs, generative AI),
+    software_engineering (general dev, APIs), data_analytics (BI, dashboards, reporting, SQL-heavy insight),
+    research (academic/scientific R&D), management (people management, programme management),
+    other (nothing else fits). Score 2 if the assignment is defensible but another value is equally valid.
+- years_experience: only if a number is explicitly stated; never inferred from seniority.
+- key_responsibilities: up to 7 concrete verb-led actions explicitly stated in the posting; if more than 7 are listed, the extractor should have selected the 7 most important ones; generic filler excluded; no inferred items.
+- education_required: only if explicitly required, not preferred.
+
+SKILLS
+- skills_required: all named technical skills, tools, technologies, and methodology terms the posting
+  presents as required or expected. The extractor used semantic judgment — required intent may come
+  from explicit language ("required", "must have") or simply from context (skills listed as expected
+  without qualification). This list should be exhaustive within that intent. Pure marketing filler
+  excluded. Process/methodology terms (Agile, Scrum) belong here, not in skills_soft.
+- skills_preferred: all named technical skills the posting presents as optional or desirable rather
+  than required. The extractor used semantic judgment to identify optional framing — examples of
+  optional language include "preferred", "nice to have", "a plus", "bonus", "ideally", "desirable",
+  but these are examples not an exhaustive list. Items should be concise skill names, not verbose
+  phrases. Null is correct when no skill is presented as optional.
+- skills_soft: interpersonal and organisational skills the employer genuinely emphasises. Concise
+  phrases (2–7 words). Covers soft skills regardless of required/preferred framing. Generic boilerplate
+  with zero specificity may be null — correct. Process/methodology terms in skills_soft is an error.
+
+COMPENSATION
+- salary: only if explicitly stated as a number or range; never inferred.
+
+─────────────────────────────────────────────────────────────────────────────────
+
+SCORING GUIDE (apply to every dimension):
+  3 = correct and complete per the rules above; no meaningful issues
+  2 = mostly correct but a minor deviation from the rules, or a small omission
+  1 = clearly wrong, hallucinated, or a significant violation of the rules
+
+IMPORTANT — when in doubt, score 2 not 1:
+  If you cannot determine from the description alone whether the extracted value is correct
+  (e.g. industry classification where the sector is genuinely ambiguous, seniority where signals
+  conflict, skills where completeness is hard to verify in a long description), score 2.
+  Reserve 1 for clear, unambiguous errors.
+
+DIMENSIONS:
+
+COMPANY
+- company_name_accuracy        correctly extracted or null if not stated
+- company_description_accuracy always null (populated by enrichment agent, not extracted); score 3 if null, score 1 if any value present
+- remote_policy_accuracy       remote/hybrid/on-site correctly identified or null
+- employment_type_accuracy     full-time/contract/casual correctly identified or null
+
+ROLE
+- seniority_accuracy           TO SCORE: (1) check title and description for explicit seniority
+                               words — "Senior", "Lead", "Principal", "Manager", "Director", "VP",
+                               "AVP", "Staff", level phrases like "mid-level" — if present, verify
+                               the extractor used the correct seniority value directly; penalise if
+                               it defaulted to years-based inference instead; (2) if no explicit
+                               seniority word exists, determine year-based level, then check whether
+                               responsibilities clearly describe higher scope (managing people,
+                               owning architecture, mentoring juniors — examples, not exhaustive);
+                               penalise if extractor ignored a clear scope signal; (3) "unknown" is
+                               correct when signals are genuinely absent or conflicting — do not
+                               penalise it
+- job_family_accuracy          title-first: clear title keyword overrides responsibilities; ambiguous title → responsibilities
+- years_experience_accuracy    only extracted if explicitly stated as a number
+- education_accuracy           only required education; preferred/nice-to-have education excluded
+- responsibilities_quality     up to 7 concrete verb-led actions explicitly stated; if the posting lists more than 7, the 7 most important should have been selected; no inferred items; no generic filler; penalise truncation (e.g. only 5 when 9 are clearly listed)
+
+SKILLS
+- skills_required_accuracy     TO SCORE: (1) read the posting and identify every technical skill,
+                               tool, technology, and methodology term you judge to be required or
+                               expected — this is your ground truth; (2) check how many the extractor
+                               captured; (3) check whether any extracted items are clearly wrong
+                               (hallucinated, soft skills, pure filler). Score 3 if coverage is
+                               complete and items are correct, 2 if minor omissions or one wrong item,
+                               1 if significant omissions or multiple wrong items. Agile/Scrum are
+                               technical — penalise if they appear in skills_soft instead.
+- skills_preferred_accuracy    TO SCORE: (1) read the posting and identify every technical skill you
+                               judge to be presented as optional or desirable (use semantic judgment —
+                               not just explicit keywords); (2) check how many the extractor captured
+                               and whether items are concise skill names rather than verbose phrases;
+                               (3) check for wrong items (required skills incorrectly here, non-skills,
+                               personality traits). Score 3 if coverage and format are correct, 2 if
+                               minor omissions or format issues, 1 if significant misses or wrong items.
+                               Null is correct when nothing in the posting is presented as optional.
+- skills_soft_accuracy         TO SCORE: (1) identify soft/interpersonal skills the employer genuinely
+                               emphasises (a sentence or bullet devoted to it signals intent); (2) check
+                               extractor coverage and format (concise phrases, not full sentences);
+                               (3) penalise Agile/Scrum in this field — they are technical. Generic
+                               boilerplate with zero specificity ("team player" with no context) being
+                               null is correct, not a miss.
+
+COMPENSATION
+- salary_accuracy              only extracted if explicitly stated; correct currency and period
+
+OVERALL
+- null_appropriateness         nulls used correctly — penalise hallucinated values and clear over-nulling
+- overall                      Holistic rule compliance across ALL field groups equally (Company, Role,
+                               Skills, Compensation). Do NOT anchor on null_appropriateness — that is
+                               scored separately. A high null_appropriateness does not imply a high
+                               overall score if other fields have systematic errors, and vice versa.
+                               Weight every group equally; penalise any group with clear rule violations.
+- flags                        specific rule violations as short strings; empty list if none
+
+Return ONLY a valid JSON object with exactly these keys. No preamble, no markdown fences.

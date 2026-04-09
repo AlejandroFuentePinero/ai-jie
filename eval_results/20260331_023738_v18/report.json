@@ -1,0 +1,75 @@
+{
+  "n": 50,
+  "pct_rows_with_score_1": 0.3,
+  "groups": {
+    "Company": {
+      "company_name_accuracy": 2.84,
+      "company_description_accuracy": 3.0,
+      "remote_policy_accuracy": 2.94,
+      "employment_type_accuracy": 2.92
+    },
+    "Role": {
+      "seniority_accuracy": 2.66,
+      "job_family_accuracy": 2.74,
+      "years_experience_accuracy": 2.88,
+      "education_accuracy": 2.84,
+      "responsibilities_quality": 2.88
+    },
+    "Skills": {
+      "skills_required_accuracy": 2.44,
+      "skills_preferred_accuracy": 2.8,
+      "skills_soft_accuracy": 2.42
+    },
+    "Compensation": {
+      "salary_accuracy": 3.0
+    },
+    "Overall": {
+      "null_appropriateness": 2.84,
+      "overall": 2.68
+    }
+  },
+  "all_flags": [
+    "seniority_mismatch",
+    "missing_responsibilities",
+    "missing_skills_required",
+    "seniority_incorrect",
+    "job_family_ambiguous",
+    "skills_soft_incomplete",
+    "seniority_mismatch",
+    "job_family_ambiguity",
+    "company_name_null",
+    "employment_type_null",
+    "skills_soft_incomplete",
+    "education_required_incorrect",
+    "job_family_ambiguous",
+    "skills_soft_incomplete",
+    "company_name_null",
+    "skills_required_minor_gaps",
+    "skills_preferred_minor_gaps",
+    "Missing seniority",
+    "Missing job family",
+    "Missing key responsibilities",
+    "Missing required skills",
+    "Missing preferred skills",
+    "Missing soft skills",
+    "missing_remote_policy",
+    "incorrect_years_experience",
+    "incorrect_skills_preferred",
+    "employment_type_incorrect",
+    "years_experience_incorrect",
+    "skills_soft_minor_issue",
+    "company_name_null",
+    "seniority_incorrect",
+    "soft_skills_incomplete",
+    "company_name_null",
+    "seniority_incorrect",
+    "skills_soft_minor_issue",
+    "job_family_inference",
+    "seniority_inference",
+    "education_preferred_included",
+    "soft_skills_incomplete",
+    "years_experience_incorrect",
+    "skills_required_incomplete",
+    "skills_preferred_incomplete"
+  ]
+}

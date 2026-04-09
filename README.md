@@ -49,19 +49,21 @@ Prompt development was tracked via an LLM-as-a-Judge framework across 33 version
 | [`Alejandrofupi/ai-jie-jobs-lite-preprocessed`](https://huggingface.co/datasets/Alejandrofupi/ai-jie-jobs-lite-preprocessed) | 3,892 DS postings — raw LLM output, scaffolding intact |
 | [`Alejandrofupi/ai-jie-jobs-lite-postprocessed`](https://huggingface.co/datasets/Alejandrofupi/ai-jie-jobs-lite-postprocessed) | 3,892 DS postings — responsibility exclusion applied, blocklist filtered, scaffolding stripped |
 
-Source CSVs (`DataScientist.csv`, `DataAnalyst.csv`) are committed to `data/raw/`. They originate from the [Glassdoor Job Listings dataset on Kaggle](https://www.kaggle.com/datasets/rashikrahmanpritom/data-science-job-posting-on-glassdoor).
+Source CSVs originate from the [Glassdoor Job Listings dataset on Kaggle](https://www.kaggle.com/datasets/rashikrahmanpritom/data-science-job-posting-on-glassdoor). They are not committed to this repo — download them manually and place them at `data/raw/DataScientist.csv` and `data/raw/DataAnalyst.csv` before running the pipeline.
 
 ---
 
 ## Quick Start
 
-**Prerequisites**: Python 3.10+, OpenAI API key, HuggingFace token.
+**Prerequisites**: Python 3.13+, OpenAI API key, HuggingFace token.
 
 ```bash
 python -m venv .venv && source .venv/bin/activate
-pip install -r requirements.txt
-cp .env.example .env   # add OPENAI_API_KEY and HF_TOKEN
+pip install -e ".[dev]"        # installs all deps + pytest from pyproject.toml
+cp .env.example .env           # add OPENAI_API_KEY and HF_TOKEN
 ```
+
+Download `DataScientist.csv` (and optionally `DataAnalyst.csv`) from the [Kaggle dataset](https://www.kaggle.com/datasets/rashikrahmanpritom/data-science-job-posting-on-glassdoor) and place them under `data/raw/`. The directory is gitignored; the files are not distributed with this repo.
 
 ### Extraction pipeline
 
@@ -106,7 +108,11 @@ python -m src.evals.eval_trend
 python -m pytest tests/ -v
 ```
 
-Unit tests cover the deterministic postprocessing layer (`apply_responsibility_exclusion`, `_remove_blocked`, `postprocess()` / `postprocess_df()` consistency).
+Tests run automatically on every push via GitHub Actions (`.github/workflows/ci.yml`).
+
+Unit tests cover:
+- Deterministic postprocessing (`apply_responsibility_exclusion`, `_remove_blocked`, `postprocess()` / `postprocess_df()` consistency)
+- Pipeline checkpoint/resume logic (idempotency, no duplicates, corrupt-line tolerance)
 
 ---
 
@@ -130,11 +136,14 @@ ai-jie/
 │       ├── eval_trend.py      # Trajectory plots
 │       └── human_eval.py      # Human scoring interface
 ├── tests/
-│   └── test_postprocess.py
+│   ├── test_postprocess.py
+│   └── test_pipeline_checkpoint.py
 ├── data/
-│   ├── raw/                   # Source CSVs (committed)
-│   └── processed/             # JSONL checkpoints
-├── eval_results/              # Per-run eval output
+│   ├── raw/                   # Source CSVs (local only — download from Kaggle)
+│   └── processed/             # JSONL checkpoints (local only)
+├── eval_results/              # Per-run eval output (committed — anchors prompt history)
+├── .github/workflows/ci.yml   # pytest on push
+├── pyproject.toml             # pinned dependencies
 └── docs/
     └── technical_report.md
 ```

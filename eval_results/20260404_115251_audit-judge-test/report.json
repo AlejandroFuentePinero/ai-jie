@@ -1,0 +1,42 @@
+{
+  "n": 5,
+  "pct_rows_with_score_1": 0.6,
+  "groups": {
+    "Company": {
+      "company_name_accuracy": 1.8,
+      "company_description_accuracy": 3.0
+    },
+    "Role": {
+      "seniority_accuracy": 2.6,
+      "job_family_accuracy": 2.4,
+      "years_experience_accuracy": 3.0,
+      "education_accuracy": 3.0,
+      "responsibilities_quality": 2.4
+    },
+    "Skills": {
+      "skills_required_accuracy": 2.0,
+      "skills_preferred_accuracy": 2.6,
+      "skills_soft_accuracy": 2.2
+    },
+    "Overall": {
+      "null_appropriateness": 2.8,
+      "overall": 2.2
+    }
+  },
+  "all_flags": [
+    "company_name missing",
+    "seniority contradicts Associate title",
+    "required skills include soft/operational items",
+    "duplicate/over-broad BSL-2 skill extraction",
+    "company_name missing",
+    "skills_required contains non-skills/entities",
+    "skills_preferred correctly null/empty",
+    "no explicit education requirement",
+    "responsibilities include extra items beyond 7 and some truncation/overlap",
+    "job_family somewhat broad but defensible",
+    "company_name missing despite company implied by posting",
+    "key_responsibilities truncated: only 7 captured and first is incomplete",
+    "skills_preferred contains required/unclear item",
+    "sector is extraneous"
+  ]
+}

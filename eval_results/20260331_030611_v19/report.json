@@ -1,0 +1,77 @@
+{
+  "n": 50,
+  "pct_rows_with_score_1": 0.34,
+  "groups": {
+    "Company": {
+      "company_name_accuracy": 2.88,
+      "company_description_accuracy": 3.0,
+      "remote_policy_accuracy": 2.92,
+      "employment_type_accuracy": 2.92
+    },
+    "Role": {
+      "seniority_accuracy": 2.66,
+      "job_family_accuracy": 2.7,
+      "years_experience_accuracy": 2.88,
+      "education_accuracy": 2.74,
+      "responsibilities_quality": 2.88
+    },
+    "Skills": {
+      "skills_required_accuracy": 2.34,
+      "skills_preferred_accuracy": 2.72,
+      "skills_soft_accuracy": 2.3
+    },
+    "Compensation": {
+      "salary_accuracy": 3.0
+    },
+    "Overall": {
+      "null_appropriateness": 2.82,
+      "overall": 2.68
+    }
+  },
+  "all_flags": [
+    "education_required_incorrect",
+    "null_appropriateness_issue",
+    "missing_responsibilities",
+    "missing_skills_required",
+    "seniority_mismatch",
+    "seniority_incorrect",
+    "job_family_ambiguous",
+    "skills_soft_incomplete",
+    "seniority_mismatch",
+    "job_family_ambiguity",
+    "skills_soft_excessive",
+    "company_name_null",
+    "employment_type_null",
+    "skills_soft_incomplete",
+    "education_required_incorrect",
+    "job_family_ambiguous",
+    "seniority_inference_issue",
+    "missing_seniority",
+    "missing_job_family",
+    "missing_years_experience",
+    "missing_education",
+    "missing_responsibilities",
+    "missing_skills_required",
+    "missing_skills_preferred",
+    "missing_skills_soft",
+    "remote_policy_incorrect",
+    "years_experience_incorrect",
+    "skills_preferred_incorrect",
+    "education_required_incorrect",
+    "seniority_inference_issue",
+    "skills_soft_incomplete",
+    "employment_type_incorrect",
+    "company_name_null",
+    "seniority_incorrect",
+    "null_overuse",
+    "company_name_null",
+    "skills_required_minor_gaps",
+    "job_family_inference",
+    "seniority_inference",
+    "education_preferred_inclusion",
+    "soft_skills_format",
+    "seniority_incorrect",
+    "skills_soft_incomplete",
+    "job_family_incorrect"
+  ]
+}

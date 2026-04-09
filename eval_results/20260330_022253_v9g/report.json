@@ -1,0 +1,37 @@
+{
+  "n": 50,
+  "pct_rows_with_score_1": 0.1,
+  "groups": {
+    "Company": {
+      "company_name_accuracy": 3.0,
+      "company_description_accuracy": 2.86,
+      "industry_accuracy": 2.72,
+      "remote_policy_accuracy": 2.94,
+      "employment_type_accuracy": 2.98
+    },
+    "Role": {
+      "seniority_accuracy": 2.84,
+      "job_family_accuracy": 2.82,
+      "years_experience_accuracy": 2.94,
+      "education_accuracy": 2.84,
+      "responsibilities_quality": 2.94
+    },
+    "Skills": {
+      "skills_technical_precision": 2.98,
+      "skills_technical_recall": 2.98,
+      "skills_soft_accuracy": 2.82,
+      "nice_to_have_accuracy": 2.88
+    },
+    "Compensation": {
+      "salary_accuracy": 3.0
+    },
+    "Overall": {
+      "null_appropriateness": 3.0,
+      "overall": 2.98
+    }
+  },
+  "all_flags": [
+    "remote_policy_incomplete",
+    "seniority_mismatch"
+  ]
+}

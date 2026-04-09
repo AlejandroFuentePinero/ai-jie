@@ -1,0 +1,69 @@
+{
+  "n": 50,
+  "pct_rows_with_score_1": 0.26,
+  "groups": {
+    "Company": {
+      "company_name_accuracy": 2.82,
+      "company_description_accuracy": 3.0,
+      "remote_policy_accuracy": 2.92,
+      "employment_type_accuracy": 2.96
+    },
+    "Role": {
+      "seniority_accuracy": 2.66,
+      "job_family_accuracy": 2.74,
+      "years_experience_accuracy": 2.88,
+      "education_accuracy": 2.88,
+      "responsibilities_quality": 2.94
+    },
+    "Skills": {
+      "skills_required_accuracy": 2.44,
+      "skills_preferred_accuracy": 2.76,
+      "skills_soft_accuracy": 2.62
+    },
+    "Compensation": {
+      "salary_accuracy": 3.0
+    },
+    "Overall": {
+      "null_appropriateness": 2.84,
+      "overall": 2.76
+    }
+  },
+  "all_flags": [
+    "seniority_mismatch",
+    "company_name_incorrect",
+    "seniority_incorrect",
+    "job_family_ambiguous",
+    "seniority_misinterpretation",
+    "job_family_misclassification",
+    "company_name_incorrect",
+    "skills_required_incomplete",
+    "skills_preferred_incomplete",
+    "skills_soft_incomplete",
+    "education_required_incorrect",
+    "Missing seniority",
+    "Missing job family",
+    "Missing years of experience",
+    "Missing key responsibilities",
+    "Missing required skills",
+    "Missing preferred skills",
+    "Missing soft skills",
+    "Missing remote policy",
+    "Incorrect years of experience",
+    "Minor responsibility omission",
+    "Minor skill omission",
+    "Minor soft skill omission",
+    "employment_type_incorrect",
+    "skills_soft_incorrect",
+    "null_incorrect",
+    "Missing company name",
+    "Incorrect seniority",
+    "Over-nulled remote policy",
+    "Over-nulled employment type",
+    "company_name_null",
+    "seniority_incorrect",
+    "soft_skills_incomplete",
+    "missing_company_name",
+    "job_family_ambiguity",
+    "skills_soft_incomplete"
+  ]
+}

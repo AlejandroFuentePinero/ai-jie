@@ -18,9 +18,6 @@ build/
 data/processed/
 data/ground_truth/
 
-# Eval results — kept locally, not version controlled
-eval_results/
-
 # Notebooks — excluded (exploration only)
 notebooks/
 
@@ -33,3 +30,5 @@ CLAUDE.md
 
 # Scratch / informal experiments (not version controlled)
 scratch/
+
+data/
