@@ -132,7 +132,7 @@ ai-jie/
 ├── tests/
 │   └── test_postprocess.py
 ├── data/
-│   ├── raw/                   # Source CSVs (not committed)
+│   ├── raw/                   # Source CSVs (committed)
 │   └── processed/             # JSONL checkpoints
 ├── eval_results/              # Per-run eval output
 └── docs/
