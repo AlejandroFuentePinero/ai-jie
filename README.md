@@ -138,9 +138,6 @@ ai-jie/
 ├── tests/
 │   ├── test_postprocess.py
 │   └── test_pipeline_checkpoint.py
-├── data/
-│   ├── raw/                   # Source CSVs (local only — download from Kaggle)
-│   └── processed/             # JSONL checkpoints (local only)
 ├── eval_results/              # Per-run eval output (committed — anchors prompt history)
 ├── .github/workflows/ci.yml   # pytest on push
 ├── pyproject.toml             # pinned dependencies
