@@ -14,8 +14,9 @@ build/
 .mypy_cache/
 .ruff_cache/
 
-# Data — raw source files and local checkpoints
-data/
+# Data — keep processed checkpoints and ground truth local; commit raw CSVs
+data/processed/
+data/ground_truth/
 
 # Eval results — kept locally, not version controlled
 eval_results/

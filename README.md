@@ -49,7 +49,7 @@ Prompt development was tracked via an LLM-as-a-Judge framework across 33 version
 | [`Alejandrofupi/ai-jie-jobs-lite-preprocessed`](https://huggingface.co/datasets/Alejandrofupi/ai-jie-jobs-lite-preprocessed) | 3,892 DS postings — raw LLM output, scaffolding intact |
 | [`Alejandrofupi/ai-jie-jobs-lite-postprocessed`](https://huggingface.co/datasets/Alejandrofupi/ai-jie-jobs-lite-postprocessed) | 3,892 DS postings — responsibility exclusion applied, blocklist filtered, scaffolding stripped |
 
-Source CSVs are not committed. Place `DataScientist.csv` and `DataAnalyst.csv` in `data/raw/`.
+Source CSVs (`DataScientist.csv`, `DataAnalyst.csv`) are committed to `data/raw/`. They originate from the [Glassdoor Job Listings dataset on Kaggle](https://www.kaggle.com/datasets/rashikrahmanpritom/data-science-job-posting-on-glassdoor).
 
 ---
 
