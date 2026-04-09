@@ -96,6 +96,7 @@ eval_trend.py   → reads all report.json files → trend.csv + trajectory plots
 | `src/evals/eval_trend.py` | Reads all report.json files, writes trend.csv + trajectory plots |
 | `src/evals/human_eval.py` | Human scoring — same 12-dimension schema as judge |
 | `tests/test_postprocess.py` | Unit tests for deterministic postprocessing rules |
+| `tests/test_pipeline_checkpoint.py` | Unit tests for pipeline checkpoint/resume logic |
 
 ---
 
@@ -784,7 +785,9 @@ The skill blocklist (`_SKILL_BLOCKLIST` in `postprocess.py`) is a growing set of
 
 The set is seeded from patterns identified during human evaluation and prompt iteration. It is intentionally conservative — only tokens confirmed as false-positives across multiple jobs are added. The full batch run will surface the token distribution at scale, which will drive targeted expansions.
 
-16 unit tests covering both implemented components are in `tests/test_postprocess.py` (all passing as of 2026-04-04).
+22 unit tests across two files (all passing):
+- `tests/test_postprocess.py` — 16 tests covering `apply_responsibility_exclusion`, `_remove_blocked`, and `postprocess()` / `postprocess_df()` consistency
+- `tests/test_pipeline_checkpoint.py` — 6 tests covering checkpoint/resume idempotency, duplicate prevention, corrupt-line tolerance, and full/empty/partial checkpoint scenarios
 
 ### 9.15 v32 human eval → v32b / v32c / v33 — responsibility scanning refinement arc (2026-04-06)
 
@@ -844,7 +847,7 @@ All project objectives have been met. The extraction pipeline is production-grad
 - [x] Stage 2 schema redesign (v16+) — skills partitioned by intent, chain-of-thought scaffolding, salary/remote fields removed
 - [x] Postprocessing layer — responsibility exclusion + skill blocklist (`postprocess.py`)
 - [x] Codebase audit (2026-04-04) — all modules reviewed and cleaned
-- [x] Unit tests — 16 tests in `tests/test_postprocess.py`, all passing
+- [x] Unit tests — 22 tests across `tests/test_postprocess.py` (postprocessing rules) and `tests/test_pipeline_checkpoint.py` (checkpoint/resume logic), all passing. CI runs on every push via GitHub Actions.
 - [x] 28-posting human eval of v32 (2026-04-06) — noise in `skills_required` identified; fixed in v32b→v33 arc (§9.15)
 - [x] v33 locked as batch prompt — Opus 4.6 confirmed production-ready
 - [x] Full batch run complete (2026-04-06) — 3,892 DS records at v33; 145 rate-limit failures recovered via checkpoint
